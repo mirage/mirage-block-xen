@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 6634b3dd731a4c4859a544ba6a9a21c4)
+# DO NOT EDIT (digest: e3b8e4fe0ab4562677593635acd83bea)
 version = "0.1.0"
 description = "Xen block frontend and backend driver implementation"
 requires = "cstruct cstruct.syntax"
@@ -11,7 +11,8 @@ exists_if = "xenblock.cma"
 package "front" (
  version = "0.1.0"
  description = "Xen block frontend and backend driver implementation"
- requires = "lwt lwt.syntax cstruct cstruct.syntax mirage xenblock"
+ requires =
+ "lwt lwt.syntax cstruct cstruct.syntax mirage shared-memory-ring shared-memory-ring.lwt xenblock"
  archive(byte) = "blkfront.cma"
  archive(byte, plugin) = "blkfront.cma"
  archive(native) = "blkfront.cmxa"
@@ -22,7 +23,8 @@ package "front" (
 package "back" (
  version = "0.1.0"
  description = "Xen block frontend and backend driver implementation"
- requires = "lwt lwt.syntax cstruct cstruct.syntax mirage xenctrl xenblock"
+ requires =
+ "lwt lwt.syntax cstruct cstruct.syntax mirage shared-memory-ring shared-memory-ring.lwt xenctrl xenblock"
  archive(byte) = "blkback.cma"
  archive(byte, plugin) = "blkback.cma"
  archive(native) = "blkback.cmxa"

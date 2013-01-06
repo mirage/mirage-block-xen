@@ -26,7 +26,7 @@ Library blkfront
   Findlibparent:      xenblock
   Findlibname:        front
   Modules:            Blkfront
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
   CompiledObject:     best
@@ -34,4 +34,4 @@ Library blkback
   Findlibparent:      xenblock
   Findlibname:        back
   Modules:            Blkback
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, xenctrl, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenctrl, xenblock
