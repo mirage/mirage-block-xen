@@ -1,0 +1,37 @@
+OASISFormat: 0.3
+Name:        ocaml-xen-block-driver
+Version:     0.1.0
+Synopsis:    Xen block frontend and backend driver implementation
+Authors:     Jonathan Ludlam, Anil Madhavapeddy, David Scott
+License:     ISC
+Plugins:     META (0.3)
+BuildTools:  ocamlbuild
+
+Flag kernelspace
+  Description: build the kernelspace only code
+  Default: false
+
+Library xenblock
+  CompiledObject:     best
+  Path:               lib
+  Findlibname:        xenblock
+  Modules:            Blkproto
+  BuildDepends:       cstruct, cstruct.syntax
+
+Library blkfront
+  Build$:             flag(kernelspace)
+  Install$:           flag(kernelspace)
+  CompiledObject:     best
+  Path:               lib
+  Findlibparent:      xenblock
+  Findlibname:        front
+  Modules:            Blkfront
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, xenblock
+
+Library blkback
+  CompiledObject:     best
+  Path:               lib
+  Findlibparent:      xenblock
+  Findlibname:        back
+  Modules:            Blkback
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, xenctrl, xenblock
