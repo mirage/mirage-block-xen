@@ -28,9 +28,11 @@ type ops = {
 type t = {
   domid:  int;
   xg:     Gnttab.handle;
-  evtchn: Evtchn.t;
+  xe:     Eventchn.handle;
+  evtchn: Eventchn.t;
   ops :   ops;
   parse_req : Cstruct.t -> Req.t;
+  wait:   Eventchn.t -> unit Lwt.t;
 }
 
 let process t ring slot =
@@ -48,8 +50,16 @@ let process t ring slot =
       | Some Write -> Gnttab.RW
       | _ -> failwith "Unhandled request type" in
     (* XXX: peeking inside the cstruct again *)
-    let thread = Gnttab.with_mapping t.xg t.domid seg.gref perm
-      (fun page -> fn page sector seg.first_sector seg.last_sector) in
+    let grant = { Gnttab.domid = Int32.of_int t.domid; reference = seg.gref } in
+    let thread = match Gnttab.map t.xg grant perm with
+      | None -> failwith "Failed to map reference"
+      | Some mapping ->
+        try_lwt
+          let page = Gnttab.contents mapping in
+          fn page sector seg.first_sector seg.last_sector
+        finally
+          Gnttab.unmap_exn t.xg mapping;
+          return () in
     let newoff = off + (seg.last_sector - seg.first_sector + 1) in
     (newoff,thread::threads)
   ) (0, []) (Array.to_list req.segs) in
@@ -62,29 +72,34 @@ let process t ring slot =
     (* XXX: what is this:
       if more_to_do then Activations.wake t.evtchn; *)
     if notify 
-	then Evtchn.notify t.evtchn;
+	then Eventchn.notify t.xe t.evtchn;
     return ()
   in ()
 
 (* Thread to poll for requests and generate responses *)
-let service_thread t evtchn fn =
+let service_thread wait t evtchn fn =
   let rec inner () =
     Ring.Rpc.Back.ack_requests t fn;
-    lwt () = Activations.wait evtchn in
+    lwt () = wait evtchn in
     inner () in
   inner ()
 
-let init xg domid ring_ref evtchn_ref proto ops =
-  let evtchn = Evtchn.bind_interdomain domid evtchn_ref in
+let init xg xe domid ring_ref evtchn_ref proto wait ops =
+  let evtchn = Eventchn.bind_interdomain xe domid evtchn_ref in
   let parse_req, idx_size = match proto with
     | X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
     | X86_32 -> Req.Proto_32.read_request, Req.Proto_64.total_size
     | Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
-  let buf = Gnttab.map_contiguous_grant_refs xg domid [ ring_ref ] Gnttab.RW in
-  let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
-  let r = Ring.Rpc.Back.init ring in
-  let t = { domid; xg; evtchn; ops; parse_req } in
-  let th = service_thread r evtchn (process t r) in
-  on_cancel th (fun () -> Gnttab.unmap xg buf);
-  th
+  let grants = List.map (fun r -> { Gnttab.domid = Int32.of_int domid; reference = r }) [ ring_ref ] in
+  match Gnttab.mapv xg grants Gnttab.RW with
+  | None ->
+    failwith "Gnttab.mapv failed"
+  | Some mapping ->
+    let buf = Gnttab.contents mapping in
+    let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
+    let r = Ring.Rpc.Back.init ring in
+    let t = { domid; xg; xe; evtchn; ops; wait; parse_req } in
+    let th = service_thread wait r evtchn (process t r) in
+    on_cancel th (fun () -> Gnttab.unmap_exn xg mapping);
+    th
