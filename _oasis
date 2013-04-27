@@ -8,7 +8,11 @@ Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
 Flag kernelspace
-  Description: build the kernelspace only code
+  Description: build the kernelspace code
+  Default: false
+
+Flag userspace
+  Description: build the userspace code
   Default: false
 
 Library xenblock
@@ -29,9 +33,11 @@ Library blkfront
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
+  Build$:             flag(kernelspace)||flag(userspace)
+  Install$:           flag(kernelspace)||flag(userspace)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      xenblock
   Findlibname:        back
   Modules:            Blkback
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenctrl, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock

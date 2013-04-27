@@ -17,6 +17,7 @@
 
 open Lwt
 open Printf
+open OS
 open Blkproto
 
 type features = {
@@ -32,8 +33,8 @@ type transport = {
   backend: string;
   ring: (Res.t,int64) Ring.Rpc.Front.t;
   client: (Res.t,int64) Lwt_ring.Front.t;
-  gnts: Gnttab.r list;
-  evtchn: Evtchn.t;
+  gnts: Gnttab.grant_table_index list;
+  evtchn: Eventchn.t;
   features: features;
 }
 
@@ -47,6 +48,8 @@ exception IO_error of string
 
 (** Set of active block devices *)
 let devices : (id, t) Hashtbl.t = Hashtbl.create 1
+
+let h = Eventchn.init ()
 
 (* Allocate a ring, given the vdev and backend domid *)
 let alloc ~order (num,domid) =
@@ -99,15 +102,15 @@ let plug (id:id) =
   printf "Negotiated a %s\n%!" (if ring_page_order = 0 then "singe-page ring" else sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
 
   lwt (gnts, ring, client) = alloc ~order:ring_page_order (vdev,backend_id) in
-  let evtchn = Evtchn.alloc_unbound_port backend_id in
-  let port = Evtchn.port evtchn in
+  let evtchn = Eventchn.bind_unbound_port h backend_id in
+  let port = Eventchn.to_int evtchn in
   let ring_info =
     (* The new protocol writes (ring-refN = G) where N=0,1,2 *)
     let rfs = snd(List.fold_left (fun (i, acc) g ->
-      i + 1, ((sprintf "ring-ref%d" i, Gnttab.to_string g) :: acc)
+      i + 1, ((sprintf "ring-ref%d" i, Gnttab.string_of_grant_table_index g) :: acc)
     ) (0, []) gnts) in
     if ring_page_order = 0
-    then [ "ring-ref", Gnttab.to_string (List.hd gnts) ] (* backwards compat *)
+    then [ "ring-ref", Gnttab.string_of_grant_table_index (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
   let info = [
     "event-channel", string_of_int port;
@@ -134,7 +137,7 @@ let plug (id:id) =
   in
   printf "Blkfront features: barrier=%b removable=%b sector_size=%Lu sectors=%Lu\n%!" 
     features.barrier features.removable features.sector_size features.sectors;
-  Evtchn.unmask evtchn;
+  Eventchn.unmask h evtchn;
   let t = { backend_id; backend; ring; client; gnts; evtchn; features } in
   (* Start the background poll thread *)
   let _ = poll t in
@@ -163,12 +166,12 @@ let rec write_page t offset page =
       (fun r ->
         Gnttab.with_grant ~domid:t.t.backend_id ~perm:Gnttab.RW r page
           (fun () ->
-            let gref = Gnttab.to_int32 r in
+            let gref = Gnttab.int32_of_grant_table_index r in
             let id = Int64.of_int32 gref in
             let segs =[| { Req.gref; first_sector=0; last_sector=7 } |] in
             let req = Req.({op=Some Req.Write; handle=t.vdev; id; sector; segs}) in
             lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-              (fun () -> Evtchn.notify t.t.evtchn)
+              (fun () -> Eventchn.notify h t.t.evtchn)
               (Req.Proto_64.write_request req) in
             let open Res in
             Res.(match res.st with
@@ -258,13 +261,13 @@ let read_single_request t r =
 		    let last_sector = match i with
 		      |n when n == len-1 -> r.end_offset
 		      |_ -> 7 in
-		    let gref = Gnttab.to_int32 rf in
+		    let gref = Gnttab.int32_of_grant_table_index rf in
 		    { Req.gref; first_sector; last_sector }
 		  ) (Array.of_list rs) in
-		let id = Int64.of_int32 (Gnttab.to_int32 (List.hd rs)) in
+		let id = Int64.of_int32 (Gnttab.int32_of_grant_table_index (List.hd rs)) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-		  (fun () -> Evtchn.notify t.t.evtchn)
+		  (fun () -> Eventchn.notify h t.t.evtchn)
 		  (Req.Proto_64.write_request req) in
 		let open Res in
 		match res.st with
