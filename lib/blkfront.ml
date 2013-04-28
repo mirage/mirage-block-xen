@@ -62,8 +62,9 @@ let alloc ~order (num,domid) =
   List.iter (fun (gnt, page) -> Gnttab.grant_access ~domid ~perm:Gnttab.RW gnt page) (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
+  printf "Blkfront %s\n%!" (Ring.Rpc.to_summary_string sring);
   let fring = Ring.Rpc.Front.init ~sring in
-  let client = Lwt_ring.Front.init fring in
+  let client = Lwt_ring.Front.init Int64.to_string fring in
   return (gnts, fring, client)
 
 (* Thread to poll for responses and activate wakeners *)
