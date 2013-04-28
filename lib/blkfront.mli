@@ -32,3 +32,4 @@ val write_page : t -> int64 -> Io_page.t -> unit Lwt.t
 val read_512 : t -> int64 -> int64 -> Cstruct.t Lwt_stream.t
 val resume : unit -> unit Lwt.t
 
+val register: unit -> unit Lwt.t

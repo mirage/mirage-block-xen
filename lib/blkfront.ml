@@ -332,7 +332,8 @@ let create ~id : Devices.blkif Lwt.t =
   end)
 
 (* Register Xen.Blkif provider with the device manager *)
-let _ =
+let register () =
+  printf "Xen.Blkfront.register\n%!";
   let plug_mvar = Lwt_mvar.create_empty () in
   let unplug_mvar = Lwt_mvar.create_empty () in
   let provider = object(self)
@@ -351,13 +352,10 @@ let _ =
   end in
   Devices.new_provider provider;
   (* Iterate over the plugged in VBDs and plug them in *)
-  Main.at_enter (fun () ->
-    (* Hack to let console attach before crash :) *)
-    Time.sleep 1.0 >>
-    lwt ids = enumerate () in
-	let vbds = List.map (fun id ->
-		{ Devices.p_dep_ids = []; p_cfg = []; p_id = id }
-	) ids in
-    Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
-  )
+  lwt ids = enumerate () in
+    let vbds = List.map (fun id ->
+      printf "found VBD with id: %s\n%!" id;
+      { Devices.p_dep_ids = []; p_cfg = []; p_id = id }
+    ) ids in
+  Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
 
