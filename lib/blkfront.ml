@@ -359,3 +359,6 @@ let register () =
     ) ids in
   Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
 
+let _ =
+  printf "Blkif: add resume hook\n%!";
+  Sched.add_resume_hook resume
