@@ -27,7 +27,7 @@ type ops = {
 
 type t = {
   domid:  int;
-  xg:     Gnttab.handle;
+  xg:     Gnttab.interface;
   xe:     Eventchn.handle;
   evtchn: Eventchn.t;
   ops :   ops;
@@ -50,15 +50,15 @@ let process t ring slot =
       | Some Write -> Gnttab.RW
       | _ -> failwith "Unhandled request type" in
     (* XXX: peeking inside the cstruct again *)
-    let grant = { Gnttab.domid = Int32.of_int t.domid; reference = seg.gref } in
+    let grant = { Gnttab.domid = t.domid; ref = Gnttab.grant_table_index_of_int32 seg.gref } in
     let thread = match Gnttab.map t.xg grant perm with
       | None -> failwith "Failed to map reference"
       | Some mapping ->
         try_lwt
-          let page = Gnttab.contents mapping in
+          let page = Gnttab.Local_mapping.to_buf mapping in
           fn page sector seg.first_sector seg.last_sector
         finally
-          Gnttab.unmap_exn t.xg mapping;
+          let (_: bool) = Gnttab.unmap_exn t.xg mapping in
           return () in
     let newoff = off + (seg.last_sector - seg.first_sector + 1) in
     (newoff,thread::threads)
@@ -91,15 +91,15 @@ let init xg xe domid ring_ref evtchn_ref proto wait ops =
     | X86_32 -> Req.Proto_32.read_request, Req.Proto_64.total_size
     | Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
-  let grants = List.map (fun r -> { Gnttab.domid = Int32.of_int domid; reference = r }) [ ring_ref ] in
+  let grants = List.map (fun r -> { Gnttab.domid = domid; ref = r }) [ ring_ref ] in
   match Gnttab.mapv xg grants Gnttab.RW with
   | None ->
     failwith "Gnttab.mapv failed"
   | Some mapping ->
-    let buf = Gnttab.contents mapping in
+    let buf = Gnttab.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let r = Ring.Rpc.Back.init ring in
     let t = { domid; xg; xe; evtchn; ops; wait; parse_req } in
     let th = service_thread wait r evtchn (process t r) in
-    on_cancel th (fun () -> Gnttab.unmap_exn xg mapping);
+    on_cancel th (fun () -> let (_: bool) = Gnttab.unmap_exn xg mapping in ());
     th

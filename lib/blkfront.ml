@@ -17,6 +17,7 @@
 
 open Lwt
 open Printf
+open OS
 open Blkproto
 
 type features = {
@@ -32,8 +33,8 @@ type transport = {
   backend: string;
   ring: (Res.t,int64) Ring.Rpc.Front.t;
   client: (Res.t,int64) Lwt_ring.Front.t;
-  gnts: Gnttab.r list;
-  evtchn: Evtchn.t;
+  gnts: Gnttab.grant_table_index list;
+  evtchn: Eventchn.t;
   features: features;
 }
 
@@ -48,6 +49,8 @@ exception IO_error of string
 (** Set of active block devices *)
 let devices : (id, t) Hashtbl.t = Hashtbl.create 1
 
+let h = Eventchn.init ()
+
 (* Allocate a ring, given the vdev and backend domid *)
 let alloc ~order (num,domid) =
   let name = sprintf "Blkif.%d" num in
@@ -59,8 +62,9 @@ let alloc ~order (num,domid) =
   List.iter (fun (gnt, page) -> Gnttab.grant_access ~domid ~perm:Gnttab.RW gnt page) (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
+  printf "Blkfront %s\n%!" (Ring.Rpc.to_summary_string sring);
   let fring = Ring.Rpc.Front.init ~sring in
-  let client = Lwt_ring.Front.init fring in
+  let client = Lwt_ring.Front.init Int64.to_string fring in
   return (gnts, fring, client)
 
 (* Thread to poll for responses and activate wakeners *)
@@ -99,15 +103,15 @@ let plug (id:id) =
   printf "Negotiated a %s\n%!" (if ring_page_order = 0 then "singe-page ring" else sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
 
   lwt (gnts, ring, client) = alloc ~order:ring_page_order (vdev,backend_id) in
-  let evtchn = Evtchn.alloc_unbound_port backend_id in
-  let port = Evtchn.port evtchn in
+  let evtchn = Eventchn.bind_unbound_port h backend_id in
+  let port = Eventchn.to_int evtchn in
   let ring_info =
     (* The new protocol writes (ring-refN = G) where N=0,1,2 *)
     let rfs = snd(List.fold_left (fun (i, acc) g ->
-      i + 1, ((sprintf "ring-ref%d" i, Gnttab.to_string g) :: acc)
+      i + 1, ((sprintf "ring-ref%d" i, Gnttab.string_of_grant_table_index g) :: acc)
     ) (0, []) gnts) in
     if ring_page_order = 0
-    then [ "ring-ref", Gnttab.to_string (List.hd gnts) ] (* backwards compat *)
+    then [ "ring-ref", Gnttab.string_of_grant_table_index (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
   let info = [
     "event-channel", string_of_int port;
@@ -134,7 +138,7 @@ let plug (id:id) =
   in
   printf "Blkfront features: barrier=%b removable=%b sector_size=%Lu sectors=%Lu\n%!" 
     features.barrier features.removable features.sector_size features.sectors;
-  Evtchn.unmask evtchn;
+  Eventchn.unmask h evtchn;
   let t = { backend_id; backend; ring; client; gnts; evtchn; features } in
   (* Start the background poll thread *)
   let _ = poll t in
@@ -163,12 +167,12 @@ let rec write_page t offset page =
       (fun r ->
         Gnttab.with_grant ~domid:t.t.backend_id ~perm:Gnttab.RW r page
           (fun () ->
-            let gref = Gnttab.to_int32 r in
+            let gref = Gnttab.int32_of_grant_table_index r in
             let id = Int64.of_int32 gref in
             let segs =[| { Req.gref; first_sector=0; last_sector=7 } |] in
             let req = Req.({op=Some Req.Write; handle=t.vdev; id; sector; segs}) in
             lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-              (fun () -> Evtchn.notify t.t.evtchn)
+              (fun () -> Eventchn.notify h t.t.evtchn)
               (Req.Proto_64.write_request req) in
             let open Res in
             Res.(match res.st with
@@ -258,13 +262,13 @@ let read_single_request t r =
 		    let last_sector = match i with
 		      |n when n == len-1 -> r.end_offset
 		      |_ -> 7 in
-		    let gref = Gnttab.to_int32 rf in
+		    let gref = Gnttab.int32_of_grant_table_index rf in
 		    { Req.gref; first_sector; last_sector }
 		  ) (Array.of_list rs) in
-		let id = Int64.of_int32 (Gnttab.to_int32 (List.hd rs)) in
+		let id = Int64.of_int32 (Gnttab.int32_of_grant_table_index (List.hd rs)) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-		  (fun () -> Evtchn.notify t.t.evtchn)
+		  (fun () -> Eventchn.notify h t.t.evtchn)
 		  (Req.Proto_64.write_request req) in
 		let open Res in
 		match res.st with
@@ -308,3 +312,53 @@ let resume t =
 let resume () =
   let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
   Lwt_list.iter_p (fun (k,v) -> resume v) devs
+
+let create ~id : Devices.blkif Lwt.t =
+  printf "Xen.Blkif: create %s\n%!" id;
+  lwt trans = plug id in
+  let dev = { vdev = int_of_string id;
+ 	      t = trans } in
+  Hashtbl.add devices id dev;
+  printf "Xen.Blkif: success\n%!";
+  return (object
+    method id = id
+    method read_512 = read_512 dev
+    method write_page = write_page dev
+    method sector_size = 4096
+    method size = Int64.mul dev.t.features.sectors dev.t.features.sector_size
+    method readwrite = dev.t.features.readwrite
+    method ppname = sprintf "Xen.blkif:%s" id
+    method destroy = unplug id
+  end)
+
+(* Register Xen.Blkif provider with the device manager *)
+let register () =
+  printf "Xen.Blkfront.register\n%!";
+  let plug_mvar = Lwt_mvar.create_empty () in
+  let unplug_mvar = Lwt_mvar.create_empty () in
+  let provider = object(self)
+     method id = "Xen.Blkif"
+     method plug = plug_mvar 
+     method unplug = unplug_mvar
+     method create ~deps ~cfg id =
+	  (* no cfg required: we will check xenstore instead *)
+      lwt blkif = create ~id in
+      let entry = Devices.({
+        provider=self; 
+        id=self#id; 
+        depends=[];
+        node=Blkif blkif }) in
+      return entry
+  end in
+  Devices.new_provider provider;
+  (* Iterate over the plugged in VBDs and plug them in *)
+  lwt ids = enumerate () in
+    let vbds = List.map (fun id ->
+      printf "found VBD with id: %s\n%!" id;
+      { Devices.p_dep_ids = []; p_cfg = []; p_id = id }
+    ) ids in
+  Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
+
+let _ =
+  printf "Blkif: add resume hook\n%!";
+  Sched.add_resume_hook resume
