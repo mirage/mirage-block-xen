@@ -40,4 +40,4 @@ Library blkback
   Findlibparent:      xenblock
   Findlibname:        back
   Modules:            Blkback
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock, xenctrl
