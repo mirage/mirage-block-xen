@@ -58,7 +58,7 @@ let process t ring slot =
           let page = Gnttab.Local_mapping.to_buf mapping in
           fn page sector seg.first_sector seg.last_sector
         finally
-          let (_: bool) = Gnttab.unmap_exn t.xg mapping in
+          let () = Gnttab.unmap_exn t.xg mapping in
           return () in
     let newoff = off + (seg.last_sector - seg.first_sector + 1) in
     (newoff,thread::threads)
@@ -101,5 +101,5 @@ let init xg xe domid ring_ref evtchn_ref proto wait ops =
     let r = Ring.Rpc.Back.init ring in
     let t = { domid; xg; xe; evtchn; ops; wait; parse_req } in
     let th = service_thread wait r evtchn (process t r) in
-    on_cancel th (fun () -> let (_: bool) = Gnttab.unmap_exn xg mapping in ());
+    on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
     th
