@@ -18,6 +18,76 @@
 open Lwt
 open Printf
 
+(* Control messages via xenstore *)
+
+module Mode = struct
+  type t = ReadOnly | ReadWrite
+  let to_string = function
+    | ReadOnly -> "r"
+    | ReadWrite -> "w"
+  let of_string = function
+    | "r" -> Some ReadOnly
+    | "w" -> Some ReadWrite
+    | _ -> None
+end
+
+module Media = struct
+  type t = CDROM | Disk
+  let to_string = function
+    | CDROM -> "cdrom"
+    | Disk -> "disk"
+  let of_string = function
+    | "cdrom" -> Some CDROM
+    | "disk" -> Some Disk
+    | _ -> None
+end
+
+module State = struct
+  type t = Initialising | InitWait | Initialised | Connected | Closing | Closed
+  let table = [
+    1, Initialising;
+    2, InitWait;
+    3, Initialised;
+    4, Connected;
+    5, Closing;
+    6, Closed
+  ]
+  let table' = List.map (fun (x, y) -> y, x) table
+  let to_string t = string_of_int (List.assoc t table' )
+  let of_string t = try Some (List.assoc (int_of_string t) table) with _ -> None
+end
+
+module Configuration = struct
+  type t = {
+    virtual_device: string;
+    backend_path: string;
+    backend_domid: int;
+    frontend_path: string;
+    frontend_domid: int;
+    mode: Mode.t;
+    media: Media.t;
+    removable: bool;
+  }
+
+  let to_assoc_list t =
+    let backend = [
+      "frontend-id", string_of_int t.frontend_domid;
+      "online", "1";
+      "removable", if t.removable then "1" else "0";
+      "state", State.to_string State.Initialising;
+      "mode", Mode.to_string t.mode;
+    ] in
+    let frontend = [
+      "backend-id", string_of_int t.backend_domid;
+      "state", State.to_string State.Initialising;
+      "virtual-device", t.virtual_device;
+      "device-type", Media.to_string t.media;
+    ] in
+    []
+    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.backend_path k, v) backend)
+    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.frontend_path k, v) frontend)
+end
+
 type proto = | X86_64 | X86_32 | Native
 
 (* Block requests; see include/xen/io/blkif.h *)
