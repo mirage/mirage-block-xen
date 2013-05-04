@@ -163,6 +163,10 @@ module RingInfo = struct
     protocol: Protocol.t;
   }
 
+  let to_string t =
+    Printf.sprintf "{ ref = %ld; event_channel = %d; protocol = %s }"
+    t.ref t.event_channel (Protocol.to_string t.protocol)
+
   let _ring_ref = "ring-ref"
   let _event_channel = "event-channel"
   let _protocol = "protocol"
