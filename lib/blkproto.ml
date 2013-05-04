@@ -208,6 +208,12 @@ module RingInfo = struct
     `OK { ref; event_channel; protocol }
 end
 
+module Hotplug = struct
+  let _hotplug_status = "hotplug-status"
+  let _online = "online"
+  let _params = "params"
+end
+
 (* Block requests; see include/xen/io/blkif.h *)
 module Req = struct
 
