@@ -25,8 +25,12 @@ type ('a, 'b) result = [
 let ( >>= ) x f = match x with
   | `Error _ as y -> y
   | `OK x -> f x
-
+let list l k =
+  if not(List.mem_assoc k l)
+  then `Error (Printf.sprintf "missing %s key" k)
+  else `OK (List.assoc k l)
 let int x = try `OK (int_of_string x) with _ -> `Error ("not an int: " ^ x)
+let int32 x = try `OK (Int32.of_string x) with _ -> `Error ("not an int32: " ^ x)
 let int64 x = try `OK (Int64.of_string x) with _ -> `Error ("not an int64: " ^ x)
 
 (* Control messages via xenstore *)
@@ -111,10 +115,10 @@ module Protocol = struct
   type t = X86_64 | X86_32 | Native
 
   let of_string = function
-    | "x86_32-abi" -> Some X86_32
-    | "x86_64-abi" -> Some X86_64
-    | "native"     -> Some Native
-    | _            -> None
+    | "x86_32-abi" -> `OK X86_32
+    | "x86_64-abi" -> `OK X86_64
+    | "native"     -> `OK Native
+    | x            -> `Error ("unknown protocol: " ^ x)
 
   let to_string = function
     | X86_64 -> "x86_64-abi"
@@ -140,20 +144,43 @@ module DiskInfo = struct
     _info, string_of_int (Media.to_int t.media lor (Mode.to_int t.mode));
   ]
 
-  let of_assoc_list list =
-    let string k =
-      if not(List.mem_assoc k list)
-      then `Error (Printf.sprintf "missing %s key" k)
-      else `OK (List.assoc k list) in
-    string _sector_size >>= fun x -> int x
+  let of_assoc_list l =
+    list l _sector_size >>= fun x -> int x
     >>= fun sector_size ->
-    string _sectors >>= fun x -> int64 x
+    list l _sectors >>= fun x -> int64 x
     >>= fun sectors ->
-    string _info >>= fun x -> int x
+    list l _info >>= fun x -> int x
     >>= fun info ->
     let media = Media.of_int info
     and mode = Mode.of_int info in
     `OK { sectors; sector_size; media; mode }
+end
+
+module RingInfo = struct
+  type t = {
+    ref: int32;
+    event_channel: int;
+    protocol: Protocol.t;
+  }
+
+  let _ring_ref = "ring-ref"
+  let _event_channel = "event-channel"
+  let _protocol = "protocol"
+
+  let to_assoc_list t = [
+    _ring_ref, Int32.to_string t.ref;
+    _event_channel, string_of_int t.event_channel;
+    _protocol, Protocol.to_string t.protocol
+  ]
+
+  let of_assoc_list l =
+    list l _ring_ref >>= fun x -> int32 x
+    >>= fun ref ->
+    list l _event_channel >>= fun x -> int x
+    >>= fun event_channel ->
+    list l _protocol >>= fun x -> Protocol.of_string x
+    >>= fun protocol ->
+    `OK { ref; event_channel; protocol }
 end
 
 (* Block requests; see include/xen/io/blkif.h *)
