@@ -18,6 +18,17 @@
 open Lwt
 open Printf
 
+type ('a, 'b) result = [
+  | `OK of 'a
+  | `Error of 'b
+]
+let ( >>= ) x f = match x with
+  | `Error _ as y -> y
+  | `OK x -> f x
+
+let int x = try `OK (int_of_string x) with _ -> `Error ("not an int: " ^ x)
+let int64 x = try `OK (Int64.of_string x) with _ -> `Error ("not an int64: " ^ x)
+
 (* Control messages via xenstore *)
 
 module Mode = struct
@@ -29,6 +40,10 @@ module Mode = struct
     | "r" -> Some ReadOnly
     | "w" -> Some ReadWrite
     | _ -> None
+  let to_int = function
+    | ReadOnly -> 4 (* VDISK_READONLY *)
+    | ReadWrite -> 0
+  let of_int x = if (x land 4) = 4 then ReadOnly else ReadWrite
 end
 
 module Media = struct
@@ -40,6 +55,10 @@ module Media = struct
     | "cdrom" -> Some CDROM
     | "disk" -> Some Disk
     | _ -> None
+  let to_int = function
+    | CDROM -> 1 (* VDISK_READONLY *)
+    | Disk  -> 0
+  let of_int x = if (x land 1) = 1 then CDROM else Disk
 end
 
 module State = struct
@@ -57,7 +76,7 @@ module State = struct
   let of_string t = try Some (List.assoc (int_of_string t) table) with _ -> None
 end
 
-module Configuration = struct
+module Connection = struct
   type t = {
     virtual_device: string;
     backend_path: string;
@@ -101,6 +120,40 @@ module Protocol = struct
     | X86_64 -> "x86_64-abi"
     | X86_32 -> "x86_32-abi"
     | Native -> "native"
+end
+
+module DiskInfo = struct
+  type t = {
+    sector_size: int;
+    sectors: int64;
+    media: Media.t;
+    mode: Mode.t;
+  }
+
+  let _sector_size = "sector-size"
+  let _sectors = "sectors"
+  let _info = "info"
+
+  let to_assoc_list t = [
+    _sector_size, string_of_int t.sector_size;
+    _sectors, Int64.to_string t.sectors;
+    _info, string_of_int (Media.to_int t.media lor (Mode.to_int t.mode));
+  ]
+
+  let of_assoc_list list =
+    let string k =
+      if not(List.mem_assoc k list)
+      then `Error (Printf.sprintf "missing %s key" k)
+      else `OK (List.assoc k list) in
+    string _sector_size >>= fun x -> int x
+    >>= fun sector_size ->
+    string _sectors >>= fun x -> int64 x
+    >>= fun sectors ->
+    string _info >>= fun x -> int x
+    >>= fun info ->
+    let media = Media.of_int info
+    and mode = Mode.of_int info in
+    `OK { sectors; sector_size; media; mode }
 end
 
 (* Block requests; see include/xen/io/blkif.h *)
