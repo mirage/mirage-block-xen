@@ -88,7 +88,20 @@ module Configuration = struct
     @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.frontend_path k, v) frontend)
 end
 
-type proto = | X86_64 | X86_32 | Native
+module Protocol = struct
+  type t = X86_64 | X86_32 | Native
+
+  let of_string = function
+    | "x86_32-abi" -> Some X86_32
+    | "x86_64-abi" -> Some X86_64
+    | "native"     -> Some Native
+    | _            -> None
+
+  let to_string = function
+    | X86_64 -> "x86_64-abi"
+    | X86_32 -> "x86_32-abi"
+    | Native -> "native"
+end
 
 (* Block requests; see include/xen/io/blkif.h *)
 module Req = struct

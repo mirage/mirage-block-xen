@@ -87,9 +87,9 @@ let service_thread wait t evtchn fn =
 let init xg xe domid ring_ref evtchn_ref proto wait ops =
   let evtchn = Eventchn.bind_interdomain xe domid evtchn_ref in
   let parse_req, idx_size = match proto with
-    | X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
-    | X86_32 -> Req.Proto_32.read_request, Req.Proto_64.total_size
-    | Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
+    | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
+    | Protocol.X86_32 -> Req.Proto_32.read_request, Req.Proto_64.total_size
+    | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r -> { Gnttab.domid = domid; ref = r }) [ ring_ref ] in
   match Gnttab.mapv xg grants Gnttab.RW with
