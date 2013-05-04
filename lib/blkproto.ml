@@ -78,6 +78,21 @@ module State = struct
   let table' = List.map (fun (x, y) -> y, x) table
   let to_string t = string_of_int (List.assoc t table' )
   let of_string t = try Some (List.assoc (int_of_string t) table) with _ -> None
+
+  let of_int x =
+    if List.mem_assoc x table
+    then `OK (List.assoc x table)
+    else `Error (Printf.sprintf "unknown device state: %d" x)
+
+  let _state = "state"
+  let keys = [ _state ]
+  let of_assoc_list l =
+    list l _state >>= fun x ->
+    int x >>= fun x ->
+    of_int x
+  let to_assoc_list t = [
+    _state, string_of_int (List.assoc t table')
+  ]
 end
 
 module Connection = struct
