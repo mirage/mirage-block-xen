@@ -60,7 +60,7 @@ module Media = struct
     | "disk" -> Some Disk
     | _ -> None
   let to_int = function
-    | CDROM -> 1 (* VDISK_READONLY *)
+    | CDROM -> 1 (* VDISK_CDROM *)
     | Disk  -> 0
   let of_int x = if (x land 1) = 1 then CDROM else Disk
 end
