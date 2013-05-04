@@ -171,6 +171,12 @@ module RingInfo = struct
   let _event_channel = "event-channel"
   let _protocol = "protocol"
 
+  let keys = [
+    _ring_ref;
+    _event_channel;
+    _protocol;
+  ]
+
   let to_assoc_list t = [
     _ring_ref, Int32.to_string t.ref;
     _event_channel, string_of_int t.event_channel;
