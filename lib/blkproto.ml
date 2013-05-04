@@ -18,7 +18,201 @@
 open Lwt
 open Printf
 
-type proto = | X86_64 | X86_32 | Native
+type ('a, 'b) result = [
+  | `OK of 'a
+  | `Error of 'b
+]
+let ( >>= ) x f = match x with
+  | `Error _ as y -> y
+  | `OK x -> f x
+let list l k =
+  if not(List.mem_assoc k l)
+  then `Error (Printf.sprintf "missing %s key" k)
+  else `OK (List.assoc k l)
+let int x = try `OK (int_of_string x) with _ -> `Error ("not an int: " ^ x)
+let int32 x = try `OK (Int32.of_string x) with _ -> `Error ("not an int32: " ^ x)
+let int64 x = try `OK (Int64.of_string x) with _ -> `Error ("not an int64: " ^ x)
+
+(* Control messages via xenstore *)
+
+module Mode = struct
+  type t = ReadOnly | ReadWrite
+  let to_string = function
+    | ReadOnly -> "r"
+    | ReadWrite -> "w"
+  let of_string = function
+    | "r" -> Some ReadOnly
+    | "w" -> Some ReadWrite
+    | _ -> None
+  let to_int = function
+    | ReadOnly -> 4 (* VDISK_READONLY *)
+    | ReadWrite -> 0
+  let of_int x = if (x land 4) = 4 then ReadOnly else ReadWrite
+end
+
+module Media = struct
+  type t = CDROM | Disk
+  let to_string = function
+    | CDROM -> "cdrom"
+    | Disk -> "disk"
+  let of_string = function
+    | "cdrom" -> Some CDROM
+    | "disk" -> Some Disk
+    | _ -> None
+  let to_int = function
+    | CDROM -> 1 (* VDISK_CDROM *)
+    | Disk  -> 0
+  let of_int x = if (x land 1) = 1 then CDROM else Disk
+end
+
+module State = struct
+  type t = Initialising | InitWait | Initialised | Connected | Closing | Closed
+  let table = [
+    1, Initialising;
+    2, InitWait;
+    3, Initialised;
+    4, Connected;
+    5, Closing;
+    6, Closed
+  ]
+  let table' = List.map (fun (x, y) -> y, x) table
+  let to_string t = string_of_int (List.assoc t table' )
+  let of_string t = try Some (List.assoc (int_of_string t) table) with _ -> None
+
+  let of_int x =
+    if List.mem_assoc x table
+    then `OK (List.assoc x table)
+    else `Error (Printf.sprintf "unknown device state: %d" x)
+
+  let _state = "state"
+  let keys = [ _state ]
+  let of_assoc_list l =
+    list l _state >>= fun x ->
+    int x >>= fun x ->
+    of_int x
+  let to_assoc_list t = [
+    _state, string_of_int (List.assoc t table')
+  ]
+end
+
+module Connection = struct
+  type t = {
+    virtual_device: string;
+    backend_path: string;
+    backend_domid: int;
+    frontend_path: string;
+    frontend_domid: int;
+    mode: Mode.t;
+    media: Media.t;
+    removable: bool;
+  }
+
+  let to_assoc_list t =
+    let backend = [
+      "frontend-id", string_of_int t.frontend_domid;
+      "online", "1";
+      "removable", if t.removable then "1" else "0";
+      "state", State.to_string State.Initialising;
+      "mode", Mode.to_string t.mode;
+    ] in
+    let frontend = [
+      "backend-id", string_of_int t.backend_domid;
+      "state", State.to_string State.Initialising;
+      "virtual-device", t.virtual_device;
+      "device-type", Media.to_string t.media;
+    ] in
+    []
+    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.backend_path k, v) backend)
+    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.frontend_path k, v) frontend)
+end
+
+module Protocol = struct
+  type t = X86_64 | X86_32 | Native
+
+  let of_string = function
+    | "x86_32-abi" -> `OK X86_32
+    | "x86_64-abi" -> `OK X86_64
+    | "native"     -> `OK Native
+    | x            -> `Error ("unknown protocol: " ^ x)
+
+  let to_string = function
+    | X86_64 -> "x86_64-abi"
+    | X86_32 -> "x86_32-abi"
+    | Native -> "native"
+end
+
+module DiskInfo = struct
+  type t = {
+    sector_size: int;
+    sectors: int64;
+    media: Media.t;
+    mode: Mode.t;
+  }
+
+  let _sector_size = "sector-size"
+  let _sectors = "sectors"
+  let _info = "info"
+
+  let to_assoc_list t = [
+    _sector_size, string_of_int t.sector_size;
+    _sectors, Int64.to_string t.sectors;
+    _info, string_of_int (Media.to_int t.media lor (Mode.to_int t.mode));
+  ]
+
+  let of_assoc_list l =
+    list l _sector_size >>= fun x -> int x
+    >>= fun sector_size ->
+    list l _sectors >>= fun x -> int64 x
+    >>= fun sectors ->
+    list l _info >>= fun x -> int x
+    >>= fun info ->
+    let media = Media.of_int info
+    and mode = Mode.of_int info in
+    `OK { sectors; sector_size; media; mode }
+end
+
+module RingInfo = struct
+  type t = {
+    ref: int32;
+    event_channel: int;
+    protocol: Protocol.t;
+  }
+
+  let to_string t =
+    Printf.sprintf "{ ref = %ld; event_channel = %d; protocol = %s }"
+    t.ref t.event_channel (Protocol.to_string t.protocol)
+
+  let _ring_ref = "ring-ref"
+  let _event_channel = "event-channel"
+  let _protocol = "protocol"
+
+  let keys = [
+    _ring_ref;
+    _event_channel;
+    _protocol;
+  ]
+
+  let to_assoc_list t = [
+    _ring_ref, Int32.to_string t.ref;
+    _event_channel, string_of_int t.event_channel;
+    _protocol, Protocol.to_string t.protocol
+  ]
+
+  let of_assoc_list l =
+    list l _ring_ref >>= fun x -> int32 x
+    >>= fun ref ->
+    list l _event_channel >>= fun x -> int x
+    >>= fun event_channel ->
+    list l _protocol >>= fun x -> Protocol.of_string x
+    >>= fun protocol ->
+    `OK { ref; event_channel; protocol }
+end
+
+module Hotplug = struct
+  let _hotplug_status = "hotplug-status"
+  let _online = "online"
+  let _params = "params"
+end
 
 (* Block requests; see include/xen/io/blkif.h *)
 module Req = struct
