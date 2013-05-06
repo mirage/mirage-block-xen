@@ -109,6 +109,7 @@ module Connection = struct
 
   let to_assoc_list t =
     let backend = [
+      "frontend", t.frontend_path;
       "frontend-id", string_of_int t.frontend_domid;
       "online", "1";
       "removable", if t.removable then "1" else "0";
@@ -116,6 +117,7 @@ module Connection = struct
       "mode", Mode.to_string t.mode;
     ] in
     let frontend = [
+      "backend", t.backend_path;
       "backend-id", string_of_int t.backend_domid;
       "state", State.to_string State.Initialising;
       "virtual-device", t.virtual_device;
