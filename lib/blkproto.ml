@@ -124,8 +124,8 @@ module Connection = struct
       "device-type", Media.to_string t.media;
     ] in
     []
-    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.backend_path k, v) backend)
-    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.frontend_path k, v) frontend)
+    @ (List.map (fun (k, v) -> t.backend_domid, (Printf.sprintf "%s/%s" t.backend_path k, v)) backend)
+    @ (List.map (fun (k, v) -> t.frontend_domid, (Printf.sprintf "%s/%s" t.frontend_path k, v)) frontend)
 end
 
 module Protocol = struct
