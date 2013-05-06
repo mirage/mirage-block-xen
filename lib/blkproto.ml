@@ -123,7 +123,10 @@ module Connection = struct
       "virtual-device", t.virtual_device;
       "device-type", Media.to_string t.media;
     ] in
-    []
+    [
+      t.backend_domid, (t.backend_path, "");
+      t.frontend_domid, (t.frontend_path, "");
+    ]
     @ (List.map (fun (k, v) -> t.backend_domid, (Printf.sprintf "%s/%s" t.backend_path k, v)) backend)
     @ (List.map (fun (k, v) -> t.frontend_domid, (Printf.sprintf "%s/%s" t.frontend_path k, v)) frontend)
 end
