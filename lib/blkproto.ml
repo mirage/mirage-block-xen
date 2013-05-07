@@ -109,6 +109,7 @@ module Connection = struct
 
   let to_assoc_list t =
     let backend = [
+      "frontend", t.frontend_path;
       "frontend-id", string_of_int t.frontend_domid;
       "online", "1";
       "removable", if t.removable then "1" else "0";
@@ -116,14 +117,18 @@ module Connection = struct
       "mode", Mode.to_string t.mode;
     ] in
     let frontend = [
+      "backend", t.backend_path;
       "backend-id", string_of_int t.backend_domid;
       "state", State.to_string State.Initialising;
       "virtual-device", t.virtual_device;
       "device-type", Media.to_string t.media;
     ] in
-    []
-    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.backend_path k, v) backend)
-    @ (List.map (fun (k, v) -> Printf.sprintf "%s/%s" t.frontend_path k, v) frontend)
+    [
+      t.backend_domid, (t.backend_path, "");
+      t.frontend_domid, (t.frontend_path, "");
+    ]
+    @ (List.map (fun (k, v) -> t.backend_domid, (Printf.sprintf "%s/%s" t.backend_path k, v)) backend)
+    @ (List.map (fun (k, v) -> t.frontend_domid, (Printf.sprintf "%s/%s" t.frontend_path k, v)) frontend)
 end
 
 module Protocol = struct

@@ -19,7 +19,7 @@ Library xenblock
   CompiledObject:     best
   Path:               lib
   Findlibname:        xenblock
-  Modules:            Blkproto
+  Modules:            Blkproto, Device_number
   BuildDepends:       cstruct, cstruct.syntax
 
 Library blkfront
