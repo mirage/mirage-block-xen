@@ -58,7 +58,7 @@ let process t ring slot =
           let page = Gnttab.Local_mapping.to_buf mapping in
           fn page sector seg.first_sector seg.last_sector
         finally
-          let () = Gnttab.unmap_exn t.xg mapping in
+          let () = try Gnttab.unmap_exn t.xg mapping with e -> printf "failed to unmap: %s\n%!" (Printexc.to_string e) in
           return () in
     let newoff = off + (seg.last_sector - seg.first_sector + 1) in
     (newoff,thread::threads)
