@@ -69,8 +69,9 @@ let process t ring slot =
     let slot = Ring.Rpc.Back.(slot ring (next_res_id ring)) in
     write_response (req.id, {op=req.Req.op; st=Some OK}) slot;
     let notify = Ring.Rpc.Back.push_responses_and_check_notify ring in
-    (* XXX: what is this:
-      if more_to_do then Activations.wake t.evtchn; *)
+    if Ring.Rpc.Back.more_to_do ring
+    then Activations.wake t.evtchn;
+
     if notify 
 	then Eventchn.notify t.xe t.evtchn;
     return ()
