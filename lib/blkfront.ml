@@ -152,7 +152,14 @@ let unplug id =
 
 (** Return a list of valid VBDs *)
 let enumerate () =
-  try_lwt Xs.(immediate (fun h -> directory h "device/vbd")) with _ -> return []
+  try_lwt
+    Xs.(immediate (fun h -> directory h "device/vbd"))
+  with
+    | Xs_protocol.Enoent _ ->
+      return []
+    | e ->
+      Console.log (sprintf "Blkif.enumerate caught exception: %s" (Printexc.to_string e));
+      return []
 
 (* Write a single page to disk.
    Offset is the sector number, which must be sector-aligned
@@ -353,6 +360,7 @@ let register () =
   Devices.new_provider provider;
   (* Iterate over the plugged in VBDs and plug them in *)
   lwt ids = enumerate () in
+  Console.log (sprintf "Blkif.enumerate found ids [ %s ]" (String.concat "; " ids));
     let vbds = List.map (fun id ->
       printf "found VBD with id: %s\n%!" id;
       { Devices.p_dep_ids = []; p_cfg = []; p_id = id }
