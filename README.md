@@ -1,4 +1,8 @@
 ocaml-xen-block-driver
 ======================
 
-OCaml block "frontend" and "backend" drivers for xen
+This library allows an OCaml application to
+
+  1. read and write blocks from any xen "backend" (server)
+  2. service block requests from any xen "frontend" (client)
+
