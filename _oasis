@@ -7,14 +7,6 @@ License:     ISC
 Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
-Flag kernelspace
-  Description: build the kernelspace code
-  Default: false
-
-Flag userspace
-  Description: build the userspace code
-  Default: false
-
 Library xenblock
   CompiledObject:     best
   Path:               lib
@@ -23,8 +15,6 @@ Library xenblock
   BuildDepends:       cstruct, cstruct.syntax
 
 Library blkfront
-  Build$:             flag(kernelspace)
-  Install$:           flag(kernelspace)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      xenblock
@@ -33,8 +23,6 @@ Library blkfront
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
-  Build$:             flag(kernelspace)||flag(userspace)
-  Install$:           flag(kernelspace)||flag(userspace)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      xenblock
