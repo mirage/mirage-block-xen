@@ -19,6 +19,7 @@ open Lwt
 open Printf
 open OS
 open Blkproto
+open Gnt
 
 type ops = {
   read : Io_page.t -> int64 -> int -> int -> unit Lwt.t;
@@ -45,13 +46,13 @@ let process t ring slot =
   in
   let (_,threads) = List.fold_left (fun (off,threads) seg ->
     let sector = Int64.add req.sector (Int64.of_int off) in
-    let perm = match req.op with
-      | Some Read -> Gnttab.RO 
-      | Some Write -> Gnttab.RW
+    let writable = match req.op with
+      | Some Read -> false 
+      | Some Write -> true
       | _ -> failwith "Unhandled request type" in
     (* XXX: peeking inside the cstruct again *)
-    let grant = { Gnttab.domid = t.domid; ref = Gnttab.grant_table_index_of_int32 seg.gref } in
-    let thread = match Gnttab.map t.xg grant perm with
+    let grant = { Gnttab.domid = t.domid; ref = Gnt.grant_table_index_of_int32 seg.gref } in
+    let thread = match Gnttab.map t.xg grant writable with
       | None -> failwith "Failed to map reference"
       | Some mapping ->
         try_lwt
@@ -69,8 +70,6 @@ let process t ring slot =
     let slot = Ring.Rpc.Back.(slot ring (next_res_id ring)) in
     write_response (req.id, {op=req.Req.op; st=Some OK}) slot;
     let notify = Ring.Rpc.Back.push_responses_and_check_notify ring in
-    if Ring.Rpc.Back.more_to_do ring
-    then Activations.wake t.evtchn;
 
     if notify 
 	then Eventchn.notify t.xe t.evtchn;
@@ -93,9 +92,9 @@ let init xg xe domid ring_info wait ops =
     | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r ->
-    { Gnttab.domid = domid; ref = Gnttab.grant_table_index_of_int32 r })
+    { Gnttab.domid = domid; ref = Gnt.grant_table_index_of_int32 r })
     [ ring_info.RingInfo.ref ] in
-  match Gnttab.mapv xg grants Gnttab.RW with
+  match Gnttab.mapv xg grants true with
   | None ->
     failwith "Gnttab.mapv failed"
   | Some mapping ->
