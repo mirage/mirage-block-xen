@@ -19,6 +19,7 @@ open Lwt
 open Printf
 open OS
 open Blkproto
+open Gnt
 
 type features = {
   barrier: bool;
@@ -33,7 +34,7 @@ type transport = {
   backend: string;
   ring: (Res.t,int64) Ring.Rpc.Front.t;
   client: (Res.t,int64) Lwt_ring.Front.t;
-  gnts: Gnttab.grant_table_index list;
+  gnts: Gnt.grant_table_index list;
   evtchn: Eventchn.t;
   features: features;
 }
@@ -58,8 +59,8 @@ let alloc ~order (num,domid) =
   let buf = Io_page.get_order order in
 
   let pages = Io_page.to_pages buf in
-  lwt gnts = Gnttab.get_n (List.length pages) in
-  List.iter (fun (gnt, page) -> Gnttab.grant_access ~domid ~perm:Gnttab.RW gnt page) (List.combine gnts pages);
+  lwt gnts = Gntshr.get_n (List.length pages) in
+  List.iter (fun (gnt, page) -> Gntshr.grant_access ~domid ~writeable:true gnt page) (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
   printf "Blkfront %s\n%!" (Ring.Rpc.to_summary_string sring);
@@ -108,10 +109,10 @@ let plug (id:id) =
   let ring_info =
     (* The new protocol writes (ring-refN = G) where N=0,1,2 *)
     let rfs = snd(List.fold_left (fun (i, acc) g ->
-      i + 1, ((sprintf "ring-ref%d" i, Gnttab.string_of_grant_table_index g) :: acc)
+      i + 1, ((sprintf "ring-ref%d" i, Gnt.string_of_grant_table_index g) :: acc)
     ) (0, []) gnts) in
     if ring_page_order = 0
-    then [ "ring-ref", Gnttab.string_of_grant_table_index (List.hd gnts) ] (* backwards compat *)
+    then [ "ring-ref", Gnt.string_of_grant_table_index (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
   let info = [
     "event-channel", string_of_int port;
@@ -170,11 +171,11 @@ let rec write_page t offset page =
   then fail (IO_error "read-only")
   else 
     try_lwt
-      Gnttab.with_ref
+      Gntshr.with_ref
       (fun r ->
-        Gnttab.with_grant ~domid:t.t.backend_id ~perm:Gnttab.RW r page
+        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:true r page
           (fun () ->
-            let gref = Gnttab.int32_of_grant_table_index r in
+            let gref = Gnt.int32_of_grant_table_index r in
             let id = Int64.of_int32 gref in
             let segs =[| { Req.gref; first_sector=0; last_sector=7 } |] in
             let req = Req.({op=Some Req.Write; handle=t.vdev; id; sector; segs}) in
@@ -254,12 +255,12 @@ let read_single_request t r =
   if len > 11 then
     fail (Failure (sprintf "len > 11 %s" (Single_request.to_string r)))
   else 
-    let pages = Io_page.get_n len in
+    let pages = Io_page.(to_pages (get len)) in
     let rec single_attempt () =
       try_lwt
-	Gnttab.with_refs len
+	Gntshr.with_refs len
           (fun rs ->
-            Gnttab.with_grants ~domid:t.t.backend_id ~perm:Gnttab.RW rs pages
+            Gntshr.with_grants ~domid:t.t.backend_id ~writeable:true rs pages
 	      (fun () ->
 		let segs = Array.mapi
 		  (fun i rf ->
@@ -269,10 +270,10 @@ let read_single_request t r =
 		    let last_sector = match i with
 		      |n when n == len-1 -> r.end_offset
 		      |_ -> 7 in
-		    let gref = Gnttab.int32_of_grant_table_index rf in
+		    let gref = Gnt.int32_of_grant_table_index rf in
 		    { Req.gref; first_sector; last_sector }
 		  ) (Array.of_list rs) in
-		let id = Int64.of_int32 (Gnttab.int32_of_grant_table_index (List.hd rs)) in
+		let id = Int64.of_int32 (Gnt.int32_of_grant_table_index (List.hd rs)) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
 		  (fun () -> Eventchn.notify h t.t.evtchn)
