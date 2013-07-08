@@ -7,6 +7,10 @@ License:     ISC
 Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
+Flag blkfront
+  Default:            true
+  Description:        build the frontend driver
+
 Library xenblock
   CompiledObject:     best
   Path:               lib
@@ -15,6 +19,7 @@ Library xenblock
   BuildDepends:       cstruct, cstruct.syntax
 
 Library blkfront
+  Build$:             flag(blkfront)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      xenblock
