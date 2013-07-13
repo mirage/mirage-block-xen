@@ -4,8 +4,7 @@ all: build doc
 NAME=xenblock
 J=4
 
-# Hack: userspace doesn't support Gntshr.get_n
-BLKFRONT ?= $(shell if ocamlfind query xenctrl.lwt >/dev/null 2>&1; then echo --disable-blkfront; fi)
+include config.mk
 
 export OCAMLRUNPARAM=b
 
@@ -14,7 +13,7 @@ setup.bin: setup.ml
 	@rm -f setup.cmx setup.cmi setup.o setup.cmo
 
 setup.data: setup.bin
-	@./setup.bin -configure $(BLKFRONT)
+	@./setup.bin -configure $(ENABLE_BLKFRONT) $(ENABLE_BLKBACK)
 
 build: setup.data setup.bin
 	@./setup.bin -build -j $(J)
