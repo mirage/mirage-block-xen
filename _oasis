@@ -11,6 +11,10 @@ Flag blkfront
   Default:            true
   Description:        build the frontend driver
 
+Flag blkback
+  Default:            true
+  Description:        build the backend driver
+
 Library xenblock
   CompiledObject:     best
   Path:               lib
@@ -28,6 +32,7 @@ Library blkfront
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
+  Build$:             flag(blkback)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      xenblock
