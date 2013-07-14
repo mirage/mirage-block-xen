@@ -88,7 +88,7 @@ let init xg xe domid ring_info wait ops =
   let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
   let parse_req, idx_size = match ring_info.RingInfo.protocol with
     | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
-    | Protocol.X86_32 -> Req.Proto_32.read_request, Req.Proto_64.total_size
+    | Protocol.X86_32 -> Req.Proto_32.read_request, Req.Proto_32.total_size
     | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r ->
