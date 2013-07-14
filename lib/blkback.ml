@@ -36,6 +36,8 @@ type t = {
   wait:   Eventchn.t -> unit Lwt.t;
 }
 
+let page_size = 4096
+
 let process t ring slot =
   let open Req in
   let req = t.parse_req slot in
@@ -44,35 +46,38 @@ let process t ring slot =
     | Some Write -> t.ops.write
     | _ -> failwith "Unhandled request type"
   in
-  let (_,threads) = List.fold_left (fun (off,threads) seg ->
-    let sector = Int64.add req.sector (Int64.of_int off) in
-    let writable = match req.op with
-      | Some Read -> true (* we need to write into the page *) 
-      | Some Write -> false (* we read from the guest and write to the backend *)
-      | _ -> failwith "Unhandled request type" in
-    (* XXX: peeking inside the cstruct again *)
-    let grant = { Gnttab.domid = t.domid; ref = Gnt.grant_table_index_of_int32 seg.gref } in
-    let thread = match Gnttab.map t.xg grant writable with
-      | None -> failwith "Failed to map reference"
-      | Some mapping ->
-        try_lwt
-          let page = Gnttab.Local_mapping.to_buf mapping in
-          fn page sector seg.first_sector seg.last_sector
-        finally
-          let () = try Gnttab.unmap_exn t.xg mapping with e -> printf "failed to unmap: %s\n%!" (Printexc.to_string e) in
-          return () in
+  let writable = match req.op with
+    | Some Read -> true (* we need to write into the page *) 
+    | Some Write -> false (* we read from the guest and write to the backend *)
+    | _ -> failwith "Unhandled request type" in
+
+  let segments = Array.to_list req.segs in
+  let grants = List.map (fun seg -> { Gnttab.domid = t.domid; ref = Gnt.grant_table_index_of_int32 seg.gref }) segments in
+
+  let mapping = match Gnttab.mapv t.xg grants writable with
+    | Some x -> x
+    | None -> failwith "Failed to map reference" in
+  let buffer = Gnttab.Local_mapping.to_buf mapping in
+
+  let (_, _, threads) = List.fold_left (fun (idx, off, threads) seg ->
+    let page = Bigarray.Array1.sub buffer (idx * page_size) page_size in
+
+    let sector = Int64.(add req.sector (of_int off)) in
+    let th = fn page sector seg.first_sector seg.last_sector in
     let newoff = off + (seg.last_sector - seg.first_sector + 1) in
-    (newoff,thread::threads)
-  ) (0, []) (Array.to_list req.segs) in
+
+    idx + 1, newoff, th :: threads
+  ) (0, 0, []) segments in
+
   let _ = (* handle the work in a background thread *)
     lwt () = Lwt.join threads in
+    let () = try Gnttab.unmap_exn t.xg mapping with e -> printf "Failed to unmap: %s\n%!" (Printexc.to_string e) in
     let open Res in 
     let slot = Ring.Rpc.Back.(slot ring (next_res_id ring)) in
     write_response (req.id, {op=req.Req.op; st=Some OK}) slot;
     let notify = Ring.Rpc.Back.push_responses_and_check_notify ring in
 
-    if notify 
-	then Eventchn.notify t.xe t.evtchn;
+    if notify then Eventchn.notify t.xe t.evtchn;
     return ()
   in ()
 
