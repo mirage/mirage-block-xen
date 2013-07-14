@@ -47,8 +47,8 @@ let process t ring slot =
   let (_,threads) = List.fold_left (fun (off,threads) seg ->
     let sector = Int64.add req.sector (Int64.of_int off) in
     let writable = match req.op with
-      | Some Read -> false 
-      | Some Write -> true
+      | Some Read -> true (* we need to write into the page *) 
+      | Some Write -> false (* we read from the guest and write to the backend *)
       | _ -> failwith "Unhandled request type" in
     (* XXX: peeking inside the cstruct again *)
     let grant = { Gnttab.domid = t.domid; ref = Gnt.grant_table_index_of_int32 seg.gref } in
