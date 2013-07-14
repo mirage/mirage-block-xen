@@ -5,6 +5,11 @@ NAME=xenblock
 J=4
 
 include config.mk
+config.mk: configure
+	./configure
+
+configure: configure.ml
+	ocamlfind ocamlopt -package "cmdliner,findlib" -linkpkg $< -o $@
 
 export OCAMLRUNPARAM=b
 

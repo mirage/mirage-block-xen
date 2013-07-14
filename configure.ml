@@ -1,8 +1,3 @@
-#!/usr/bin/env ocaml
-
-#use "topfind"
-#require "cmdliner"
-#require "findlib"
 
 let config_mk = "config.mk"
 

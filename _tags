@@ -29,4 +29,5 @@
 <lib/*.ml{,i}>: pkg_shared-memory-ring.lwt
 <lib/*.ml{,i}>: pkg_xenctrl
 # OASIS_STOP
+<configure.*>: not_hygienic
 <*/*>: syntax_camlp4o, pkg_lwt.syntax, pkg_cstruct.syntax
