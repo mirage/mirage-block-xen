@@ -122,9 +122,9 @@ let plug (id:id) =
   lwt () = Xs.(transaction (fun h ->
     Lwt_list.iter_s (fun (k, v) -> write h (node k) v) info
   )) in
-  lwt (_: bool) = Xs.(wait (fun h ->
+  lwt () = Xs.(wait (fun h ->
     lwt state = read h (sprintf "%s/state" backend) in
-    if Device_state.(of_string state = Connected) then return true else fail Xs_protocol.Eagain
+    if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
   )) in
   (* Read backend features *)
   lwt features =
