@@ -34,7 +34,7 @@ type transport = {
   backend: string;
   ring: (Res.t,int64) Ring.Rpc.Front.t;
   client: (Res.t,int64) Lwt_ring.Front.t;
-  gnts: Gnt.grant_table_index list;
+  gnts: Gnt.gntref list;
   evtchn: Eventchn.t;
   features: features;
 }
@@ -109,10 +109,10 @@ let plug (id:id) =
   let ring_info =
     (* The new protocol writes (ring-refN = G) where N=0,1,2 *)
     let rfs = snd(List.fold_left (fun (i, acc) g ->
-      i + 1, ((sprintf "ring-ref%d" i, Gnt.string_of_grant_table_index g) :: acc)
+      i + 1, ((sprintf "ring-ref%d" i, string_of_int g) :: acc)
     ) (0, []) gnts) in
     if ring_page_order = 0
-    then [ "ring-ref", Gnt.string_of_grant_table_index (List.hd gnts) ] (* backwards compat *)
+    then [ "ring-ref", string_of_int (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
   let info = [
     "event-channel", string_of_int port;
@@ -175,7 +175,7 @@ let rec write_page t offset page =
       (fun r ->
         Gntshr.with_grant ~domid:t.t.backend_id ~writeable:true r page
           (fun () ->
-            let gref = Gnt.int32_of_grant_table_index r in
+            let gref = Int32.of_int r in
             let id = Int64.of_int32 gref in
             let segs =[| { Req.gref; first_sector=0; last_sector=7 } |] in
             let req = Req.({op=Some Req.Write; handle=t.vdev; id; sector; segs}) in
@@ -270,10 +270,10 @@ let read_single_request t r =
 		    let last_sector = match i with
 		      |n when n == len-1 -> r.end_offset
 		      |_ -> 7 in
-		    let gref = Gnt.int32_of_grant_table_index rf in
+		    let gref = Int32.of_int rf in
 		    { Req.gref; first_sector; last_sector }
 		  ) (Array.of_list rs) in
-		let id = Int64.of_int32 (Gnt.int32_of_grant_table_index (List.hd rs)) in
+		let id = Int64.of_int (List.hd rs) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
 		  (fun () -> Eventchn.notify h t.t.evtchn)

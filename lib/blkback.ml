@@ -69,7 +69,7 @@ let service_thread t =
 
     let grants_of_segments = List.map (fun seg  -> {
       Gnttab.domid = t.domid;
-      ref = Gnt.grant_table_index_of_int32 seg.Req.gref;
+      ref = Int32.to_int seg.Req.gref;
     }) in
 
     let is_writable req = match req.Req.op with
@@ -161,7 +161,7 @@ let init xg xe domid ring_info wait ops =
     | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r ->
-    { Gnttab.domid = domid; ref = Gnt.grant_table_index_of_int32 r })
+    { Gnttab.domid = domid; ref = Int32.to_int r })
     [ ring_info.RingInfo.ref ] in
   match Gnttab.mapv xg grants true with
   | None ->
