@@ -81,15 +81,16 @@ let plug (id:id) =
   printf "Blkfront.create; vdev=%d\n%!" vdev;
   let node = sprintf "device/vbd/%d/%s" vdev in
 
-  lwt backend_id = Xs.(immediate (fun h -> read h (node "backend-id"))) in
+  lwt xs = Xs.make () in
+  lwt backend_id = Xs.(immediate xs (fun h -> read h (node "backend-id"))) in
   lwt backend_id = try_lwt return (int_of_string backend_id)
     with _ -> fail (Failure "invalid backend_id") in
-  lwt backend = Xs.(immediate (fun h -> read h (node "backend"))) in
+  lwt backend = Xs.(immediate xs (fun h -> read h (node "backend"))) in
 
   let backend_read fn default k =
     let backend = sprintf "%s/%s" backend in
       try_lwt
-        lwt s = Xs.(immediate (fun h -> read h (backend k))) in
+        lwt s = Xs.(immediate xs (fun h -> read h (backend k))) in
         return (fn s)
       with exn -> return default in
 
@@ -119,10 +120,10 @@ let plug (id:id) =
     "protocol", "x86_64-abi";
     "state", Device_state.(to_string Connected)
   ] @ ring_info in
-  lwt () = Xs.(transaction (fun h ->
+  lwt () = Xs.(transaction xs (fun h ->
     Lwt_list.iter_s (fun (k, v) -> write h (node k) v) info
   )) in
-  lwt () = Xs.(wait (fun h ->
+  lwt () = Xs.(wait xs (fun h ->
     lwt state = read h (sprintf "%s/state" backend) in
     if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
   )) in
@@ -153,8 +154,9 @@ let unplug id =
 
 (** Return a list of valid VBDs *)
 let enumerate () =
+  lwt xs = Xs.make () in
   try_lwt
-    Xs.(immediate (fun h -> directory h "device/vbd"))
+    Xs.(immediate xs (fun h -> directory h "device/vbd"))
   with
     | Xs_protocol.Enoent _ ->
       return []
