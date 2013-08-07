@@ -1,3 +1,6 @@
+0.2.1 (8-Aug-2013):
+* update to mirage-platform 0.9.4
+
 0.2.0 (17-Jul-2013):
 * blkback has significantly increased performance through
   mapping all requests on the ring simultaneously
