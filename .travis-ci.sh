@@ -23,10 +23,8 @@ opam --version
 opam --git-version
 
 opam init
-opam install ${OPAM_DEPENDS}
-
 depext=`opam install -e ubuntu xen-block-driver`
 sudo apt-get install -qq $depext
-
+opam install ${OPAM_DEPENDS}
 eval `opam config env`
 make
