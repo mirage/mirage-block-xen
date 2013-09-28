@@ -1,6 +1,6 @@
 # OASIS_START
-# DO NOT EDIT (digest: af2eb270fa971e359a8ae81f3233780e)
-version = "0.2.2"
+# DO NOT EDIT (digest: 21404bb52ff99539a32baba926d06eb4)
+version = "0.2.3"
 description = "Xen block frontend and backend driver implementation"
 requires = "cstruct cstruct.syntax"
 archive(byte) = "xenblock.cma"
@@ -9,7 +9,7 @@ archive(native) = "xenblock.cmxa"
 archive(native, plugin) = "xenblock.cmxs"
 exists_if = "xenblock.cma"
 package "front" (
- version = "0.2.2"
+ version = "0.2.3"
  description = "Xen block frontend and backend driver implementation"
  requires =
  "lwt lwt.syntax cstruct cstruct.syntax mirage shared-memory-ring shared-memory-ring.lwt xenblock"
@@ -21,7 +21,7 @@ package "front" (
 )
 
 package "back" (
- version = "0.2.2"
+ version = "0.2.3"
  description = "Xen block frontend and backend driver implementation"
  requires =
  "lwt lwt.syntax cstruct cstruct.syntax mirage shared-memory-ring shared-memory-ring.lwt xenblock xenctrl"
