@@ -69,10 +69,12 @@ let alloc ~order (num,domid) =
   return (gnts, fring, client)
 
 (* Thread to poll for responses and activate wakeners *)
-let rec poll t =
-  Activations.wait t.evtchn >>
-  let () = Lwt_ring.Front.poll t.client (Res.read_response) in
-  poll t
+let poll t =
+  let rec loop from =
+    lwt next = Activations.after t.evtchn from in
+    let () = Lwt_ring.Front.poll t.client (Res.read_response) in
+    loop next in
+  loop Activations.program_start
 
 (* Given a VBD ID and a backend domid, construct a blkfront record *)
 let plug (id:id) =
@@ -278,8 +280,8 @@ let read_single_request t r =
 		let id = Int64.of_int (List.hd rs) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-		  (fun () -> Eventchn.notify h t.t.evtchn)
-		  (Req.Proto_64.write_request req) in
+                  (fun () -> Eventchn.notify h t.t.evtchn)
+                  (Req.Proto_64.write_request req) in
 		let open Res in
 		match res.st with
 		  | Some Error -> fail (IO_error "read")
