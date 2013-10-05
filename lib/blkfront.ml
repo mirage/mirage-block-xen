@@ -69,10 +69,12 @@ let alloc ~order (num,domid) =
   return (gnts, fring, client)
 
 (* Thread to poll for responses and activate wakeners *)
-let rec poll t =
-  Activations.wait t.evtchn >>
-  let () = Lwt_ring.Front.poll t.client (Res.read_response) in
-  poll t
+let poll t =
+  let rec loop from =
+    lwt next = Activations.after t.evtchn from in
+    let () = Lwt_ring.Front.poll t.client (Res.read_response) in
+    loop next in
+  loop Activations.program_start
 
 (* Given a VBD ID and a backend domid, construct a blkfront record *)
 let plug (id:id) =
