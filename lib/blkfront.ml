@@ -280,8 +280,8 @@ let read_single_request t r =
 		let id = Int64.of_int (List.hd rs) in
 		let req = Req.({ op=Some Read; handle=t.vdev; id; sector=r.start_sector; segs }) in
 		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-		  (fun () -> Eventchn.notify h t.t.evtchn)
-		  (Req.Proto_64.write_request req) in
+                  (fun () -> Eventchn.notify h t.t.evtchn)
+                  (Req.Proto_64.write_request req) in
 		let open Res in
 		match res.st with
 		  | Some Error -> fail (IO_error "read")
