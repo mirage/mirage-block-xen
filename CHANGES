@@ -1,4 +1,4 @@
-trunk (unreleased)
+0.2.4 (13-Oct-2013)
 * fix reading non-page aligned sectors
 
 0.2.3 (5-Oct-2013):
