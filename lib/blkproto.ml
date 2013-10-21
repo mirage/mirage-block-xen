@@ -377,7 +377,7 @@ module Res = struct
     uint8_t        _padding;
     uint16_t       st;
     (* 64-bit only but we don't need to care since there aren't any more fields: *)
-    uint32_t       _padding
+    uint32_t       _padding2
   } as little_endian
 
   let write_response (id, t) slot =
