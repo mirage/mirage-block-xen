@@ -1,3 +1,6 @@
+trunk (unreleased)
+* fix build against cstruct.0.8.0
+
 0.2.4 (13-Oct-2013)
 * fix reading non-page aligned sectors
 
