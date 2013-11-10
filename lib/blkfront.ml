@@ -167,7 +167,7 @@ let enumerate () =
       return []
 
 (* Write a single page to disk.
-   Offset is the sector number, which must be sector-aligned
+   Offset is in bytes, which must be sector-aligned
    Page must be an Io_page *)
 let rec write_page t offset page =
   let sector = Int64.div offset t.t.features.sector_size in
@@ -177,7 +177,7 @@ let rec write_page t offset page =
     try_lwt
       Gntshr.with_ref
       (fun r ->
-        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:true r page
+        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:false r page
           (fun () ->
             let gref = Int32.of_int r in
             let id = Int64.of_int32 gref in
