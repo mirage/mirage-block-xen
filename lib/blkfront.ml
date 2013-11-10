@@ -177,7 +177,7 @@ let rec write_page t offset page =
     try_lwt
       Gntshr.with_ref
       (fun r ->
-        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:true r page
+        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:false r page
           (fun () ->
             let gref = Int32.of_int r in
             let id = Int64.of_int32 gref in
