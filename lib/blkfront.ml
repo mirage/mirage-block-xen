@@ -167,7 +167,7 @@ let enumerate () =
       return []
 
 (* Write a single page to disk.
-   Offset is the sector number, which must be sector-aligned
+   Offset is in bytes, which must be sector-aligned
    Page must be an Io_page *)
 let rec write_page t offset page =
   let sector = Int64.div offset t.t.features.sector_size in
