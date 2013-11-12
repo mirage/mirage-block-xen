@@ -14,7 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open OS
-
+(*
 type features = {
   barrier : bool;
   removable : bool;
@@ -22,8 +22,9 @@ type features = {
   sectors : int64;
   readwrite: bool;
 }
+*)
+include V1.BLOCK_DEVICE
 
-type t
 type id = string
 exception IO_error of string
 val create : id:id -> Devices.blkif Lwt.t

@@ -21,12 +21,14 @@ open OS
 open Blkproto
 open Gnt
 
-type features = {
-  barrier: bool;
-  removable: bool;
-  sector_size: int64; (* stored as int64 for convenient division *)
-  sectors: int64;
-  readwrite: bool;
+type 'a io = 'a Lwt.t
+
+type page_aligned_buffer = Io_page.t
+
+type info = {
+  read_write: bool;
+  sector_size: int;
+  size_sectors: int64;
 }
 
 type transport = {
@@ -36,13 +38,15 @@ type transport = {
   client: (Res.t,int64) Lwt_ring.Front.t;
   gnts: Gnt.gntref list;
   evtchn: Eventchn.t;
-  features: features;
+  info: info;
 }
 
 type t = {
   vdev: int;
   mutable t: transport
 }
+
+let get_info t = return (t.t.info)
 
 type id = string
 exception IO_error of string
@@ -129,21 +133,19 @@ let plug (id:id) =
     lwt state = read h (sprintf "%s/state" backend) in
     if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
   )) in
-  (* Read backend features *)
-  lwt features =
+  (* Read backend info *)
+  lwt info =
     lwt state = backend_read (Device_state.of_string) Device_state.Unknown "state" in
     printf "state=%s\n%!" (Device_state.prettyprint state);
-    lwt barrier = backend_read ((=) "1") false "feature-barrier" in
-    lwt removable = backend_read ((=) "1") false "removable" in
-    lwt sectors = backend_read Int64.of_string (-1L) "sectors" in
-    lwt sector_size = backend_read Int64.of_string 0L "sector-size" in
-    lwt readwrite = backend_read (fun x -> x = "w") false "mode" in
-    return { barrier; removable; sector_size; sectors; readwrite }
+    lwt size_sectors = backend_read Int64.of_string (-1L) "sectors" in
+    lwt sector_size = backend_read int_of_string 0 "sector-size" in
+    lwt read_write = backend_read (fun x -> x = "w") false "mode" in
+    return { sector_size; size_sectors; read_write }
   in
-  printf "Blkfront features: barrier=%b removable=%b sector_size=%Lu sectors=%Lu\n%!" 
-    features.barrier features.removable features.sector_size features.sectors;
+  printf "Blkfront info: sector_size=%u sectors=%Lu\n%!" 
+    info.sector_size info.size_sectors;
   Eventchn.unmask h evtchn;
-  let t = { backend_id; backend; ring; client; gnts; evtchn; features } in
+  let t = { backend_id; backend; ring; client; gnts; evtchn; info } in
   (* Start the background poll thread *)
   let _ = poll t in
   return t
@@ -170,8 +172,8 @@ let enumerate () =
    Offset is in bytes, which must be sector-aligned
    Page must be an Io_page *)
 let rec write_page t offset page =
-  let sector = Int64.div offset t.t.features.sector_size in
-  if not t.t.features.readwrite
+  let sector = Int64.(div offset (of_int t.t.info.sector_size)) in
+  if not t.t.info.read_write
   then fail (IO_error "read-only")
   else 
     try_lwt
@@ -338,8 +340,8 @@ let create ~id : Devices.blkif Lwt.t =
     method read_512 = read_512 dev
     method write_page = write_page dev
     method sector_size = 4096
-    method size = Int64.mul dev.t.features.sectors dev.t.features.sector_size
-    method readwrite = dev.t.features.readwrite
+    method size = Int64.(mul dev.t.info.size_sectors (of_int dev.t.info.sector_size))
+    method readwrite = dev.t.info.read_write
     method ppname = sprintf "Xen.blkif:%s" id
     method destroy = unplug id
   end)
@@ -372,6 +374,14 @@ let register () =
       { Devices.p_dep_ids = []; p_cfg = []; p_id = id }
     ) ids in
   Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
+
+type error = Unknown
+
+let read t sector_start buffers =
+  return (`Error Unknown)
+
+let write t sector_start buffers =
+  return (`Error Unknown)
 
 let _ =
   printf "Blkif: add resume hook\n%!";

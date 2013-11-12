@@ -29,7 +29,7 @@ Library blkfront
   Findlibparent:      xenblock
   Findlibname:        front
   Modules:            Blkfront
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, mirage-types, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
   Build$:             flag(blkback)
