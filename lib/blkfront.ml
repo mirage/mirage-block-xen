@@ -46,8 +46,6 @@ type t = {
   mutable t: transport
 }
 
-let get_info t = return (t.t.info)
-
 type id = string
 exception IO_error of string
 
@@ -168,152 +166,139 @@ let enumerate () =
       Console.log (sprintf "Blkif.enumerate caught exception: %s" (Printexc.to_string e));
       return []
 
-(* Write a single page to disk.
+(** [single_request_into op t start_sector start_offset end_offset pages]
+    issues a single request [op], starting at [start_sector] and using
+    the memory [pages] as either the target of data (if [op] is Read) or the
+    source of data (if [op] is Write). If the sector size is less than a page
+    then [start_offset] and [end_offset] can be used to start and finish the
+    data on sub-page sector boundaries in the first and last pages. *)
+let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) pages =
+  let len = List.length pages in
+  let rec retry () =
+    try_lwt
+      Gntshr.with_refs len
+        (fun rs ->
+          Gntshr.with_grants ~domid:t.t.backend_id ~writeable:(op = Req.Read) rs pages
+            (fun () ->
+              let segs = Array.mapi
+                (fun i rf ->
+                  let first_sector = match i with
+                    | 0 -> start_offset
+                    | _ -> 0 in
+                  let last_sector = match i with
+                    | n when n == len-1 -> end_offset
+                    | _ -> 7 in
+                  let gref = Int32.of_int rf in
+                  { Req.gref; first_sector; last_sector }
+                ) (Array.of_list rs) in
+              let id = Int64.of_int (List.hd rs) in
+              let sector = Int64.(add start_sector (of_int start_offset)) in
+              let req = Req.({ op=Some op; handle=t.vdev; id; sector; segs }) in
+              lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
+                (fun () -> Eventchn.notify h t.t.evtchn)
+                (Req.Proto_64.write_request req) in
+              let open Res in
+              match res.st with
+              | Some Error -> fail (IO_error "read")
+              | Some Not_supported -> fail (IO_error "unsupported")
+              | None -> fail (IO_error "unknown error")
+              | Some OK -> return ()
+            )
+          )
+    with
+    | Lwt_ring.Shutdown -> retry ()
+    | exn -> fail exn in
+  retry ()
+
+(* THIS FUNCTION IS DEPRECATED. Use 'write' instead.
+   
+   Write a single page to disk.
    Offset is in bytes, which must be sector-aligned
    Page must be an Io_page *)
 let rec write_page t offset page =
   let sector = Int64.(div offset (of_int t.t.info.sector_size)) in
   if not t.t.info.read_write
   then fail (IO_error "read-only")
-  else 
-    try_lwt
-      Gntshr.with_ref
-      (fun r ->
-        Gntshr.with_grant ~domid:t.t.backend_id ~writeable:false r page
-          (fun () ->
-            let gref = Int32.of_int r in
-            let id = Int64.of_int32 gref in
-            let segs =[| { Req.gref; first_sector=0; last_sector=7 } |] in
-            let req = Req.({op=Some Req.Write; handle=t.vdev; id; sector; segs}) in
-            lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-              (fun () -> Eventchn.notify h t.t.evtchn)
-              (Req.Proto_64.write_request req) in
-            let open Res in
-            Res.(match res.st with
-            | Some Error -> fail (IO_error "write")
-            | Some Not_supported -> fail (IO_error "unsupported")
-            | None -> fail (IO_error "unknown error")
-            | Some OK -> return ())
-          )
-      )
-       with 
-	 | Lwt_ring.Shutdown -> write_page t offset page
-	 | exn -> fail exn 
+  else single_request_into Req.Write t sector [ page ]
 
-module Single_request = struct
-  (** A large request must be broken down into a series of smaller page-aligned requests: *)
-  type t = {
-    start_sector: int64; (* page-aligned sector to start reading from *)
-    start_offset: int;   (* sector offset into the page of our data *)
-    end_sector: int64;   (* last page-aligned sector to read *)
-    end_offset: int;     (* sector offset into the page of our data *)
-  }
 
-  (** Number of pages required to issue this request *)
-  let npages_of t = Int64.(to_int (div (sub t.end_sector t.start_sector) 8L))
-
-  let to_string t =
-    sprintf "(%Lu, %u) -> (%Lu, %u)" t.start_sector t.start_offset t.end_sector t.end_offset
-
-  (* Transforms a large read of [num_sectors] starting at [sector] into a Lwt_stream
-     of single_requests, where each request will fit on the ring. *)
-  let stream_of sector num_sectors =
-    let from (sector, num_sectors) =
-      assert (sector >= 0L);
-      assert (num_sectors > 0L);
-      (* Round down the starting sector in order to get a page aligned sector *)
-      let start_sector = Int64.(mul 8L (div sector 8L)) in
-      let start_offset = Int64.(to_int (sub sector start_sector)) in
-      (* Round up the ending sector to the page boundary *)
-      let end_sector = Int64.(mul 8L (div (add (add sector num_sectors) 7L) 8L)) in
-      (* Calculate number of sectors needed *)
-      let total_sectors_needed = Int64.(sub end_sector start_sector) in
-      (* Maximum of 11 segments per request; 1 page (8 sectors) per segment so: *)
-      let total_sectors_possible = min 88L total_sectors_needed in
-      let possible_end_sector = Int64.add start_sector total_sectors_possible in
-      let end_offset = min 7 (Int64.(to_int (sub 7L (sub possible_end_sector (add sector num_sectors))))) in
-
-      let first = { start_sector; start_offset; end_sector = possible_end_sector; end_offset } in
-      if total_sectors_possible < total_sectors_needed
-      then
-        let num_sectors = Int64.(sub num_sectors (sub total_sectors_possible (of_int start_offset))) in
-        first, Some ((Int64.add start_sector total_sectors_possible), num_sectors)
-      else
-        first, None in
-    let state = ref (Some (sector, num_sectors)) in
-    Lwt_stream.from
-      (fun () ->
-        match !state with
-        | None -> return None
-        | Some x ->
-          let item, state' = from x in
-          state := state';
-          return (Some item)
-      )
-end
-
-(* Issues a single request to read from [start_sector + start_offset] to [end_sector - end_offset]
-   where: [start_sector] and [end_sector] are page-aligned; and the total number of pages will fit
-   in a single request. *)
-let read_single_request t r =
-  let open Single_request in
-  let len = npages_of r in
-  if len > 11 then
-    fail (Failure (sprintf "len > 11 %s" (Single_request.to_string r)))
-  else 
-    let pages = Io_page.(to_pages (get len)) in
-    let rec single_attempt () =
-      try_lwt
-	Gntshr.with_refs len
-          (fun rs ->
-            Gntshr.with_grants ~domid:t.t.backend_id ~writeable:true rs pages
-	      (fun () ->
-		let segs = Array.mapi
-		  (fun i rf ->
-		    let first_sector = match i with
-		      |0 -> r.start_offset
-		      |_ -> 0 in
-		    let last_sector = match i with
-		      |n when n == len-1 -> r.end_offset
-		      |_ -> 7 in
-		    let gref = Int32.of_int rf in
-		    { Req.gref; first_sector; last_sector }
-		  ) (Array.of_list rs) in
-		let id = Int64.of_int (List.hd rs) in
-                let sector = Int64.(add r.start_sector (of_int r.start_offset)) in
-		let req = Req.({ op=Some Read; handle=t.vdev; id; sector; segs }) in
-		lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-                  (fun () -> Eventchn.notify h t.t.evtchn)
-                  (Req.Proto_64.write_request req) in
-		let open Res in
-		match res.st with
-		  | Some Error -> fail (IO_error "read")
-		  | Some Not_supported -> fail (IO_error "unsupported")
-		  | None -> fail (IO_error "unknown error")
-		  | Some OK ->
-		    (* Get the pages, and convert them into Istring views *)
-		    return (Lwt_stream.of_list (List.rev (snd (List.fold_left
-		      (fun (i, acc) page ->
-			let start_offset = match i with
-			  |0 -> r.start_offset * 512
-			  |_ -> 0 in
-			let end_offset = match i with
-			  |n when n = len-1 -> (r.end_offset + 1) * 512
-			  |_ -> 4096 in
-			let bytes = end_offset - start_offset in
-			let subpage = Cstruct.sub (Io_page.to_cstruct page) start_offset bytes in
-			i + 1, subpage :: acc
-		      ) (0, []) pages
-		    ))))
-	      )
-	  )
-      with | Lwt_ring.Shutdown -> single_attempt ()
-           | exn -> fail exn in
-      single_attempt ()
-
-(* Reads [num_sectors] starting at [sector], returning a stream of Io_page.ts *)
+(* THIS FUNCTION IS DEPRECATED. Use 'read' instead.
+ 
+   Reads [num_sectors] starting at [sector], returning a stream of Io_page.ts *)
 let read_512 t sector num_sectors =
+  let module Single_request = struct
+    (** A large request must be broken down into a series of smaller page-aligned requests: *)
+    type t = {
+      start_sector: int64; (* page-aligned sector to start reading from *)
+      start_offset: int;   (* sector offset into the page of our data *)
+      end_sector: int64;   (* last page-aligned sector to read *)
+      end_offset: int;     (* sector offset into the page of our data *)
+    }
+
+    (** Number of pages required to issue this request *)
+    let npages_of t = Int64.(to_int (div (sub t.end_sector t.start_sector) 8L))
+
+    let to_string t =
+      sprintf "(%Lu, %u) -> (%Lu, %u)" t.start_sector t.start_offset t.end_sector t.end_offset
+
+    (* Transforms a large read of [num_sectors] starting at [sector] into a Lwt_stream
+       of single_requests, where each request will fit on the ring. *)
+    let stream_of sector num_sectors =
+      let from (sector, num_sectors) =
+        assert (sector >= 0L);
+        assert (num_sectors > 0L);
+        (* Round down the starting sector in order to get a page aligned sector *)
+        let start_sector = Int64.(mul 8L (div sector 8L)) in
+        let start_offset = Int64.(to_int (sub sector start_sector)) in
+        (* Round up the ending sector to the page boundary *)
+        let end_sector = Int64.(mul 8L (div (add (add sector num_sectors) 7L) 8L)) in
+        (* Calculate number of sectors needed *)
+        let total_sectors_needed = Int64.(sub end_sector start_sector) in
+        (* Maximum of 11 segments per request; 1 page (8 sectors) per segment so: *)
+        let total_sectors_possible = min 88L total_sectors_needed in
+        let possible_end_sector = Int64.add start_sector total_sectors_possible in
+        let end_offset = min 7 (Int64.(to_int (sub 7L (sub possible_end_sector (add sector num_sectors))))) in
+
+        let first = { start_sector; start_offset; end_sector = possible_end_sector; end_offset } in
+        if total_sectors_possible < total_sectors_needed
+        then
+          let num_sectors = Int64.(sub num_sectors (sub total_sectors_possible (of_int start_offset))) in
+          first, Some ((Int64.add start_sector total_sectors_possible), num_sectors)
+        else
+          first, None in
+      let state = ref (Some (sector, num_sectors)) in
+      Lwt_stream.from
+        (fun () ->
+          match !state with
+          | None -> return None
+          | Some x ->
+            let item, state' = from x in
+            state := state';
+            return (Some item)
+        )
+
+      let list_of sector num_sectors =
+        Lwt_stream.to_list (stream_of sector num_sectors)
+  end in
   let requests = Single_request.stream_of sector num_sectors in
+  let read_single_request t r =
+    let open Single_request in
+    let len = npages_of r in
+    let pages = Io_page.(to_pages (get len)) in
+    lwt () = single_request_into Req.Read t r.start_sector ~start_offset:r.start_offset ~end_offset:r.end_offset pages in
+    return (Lwt_stream.of_list (List.rev (snd (List.fold_left
+      (fun (i, acc) page ->
+        let start_offset = match i with
+        |0 -> r.start_offset * 512
+        |_ -> 0 in
+        let end_offset = match i with
+        |n when n = len-1 -> (r.end_offset + 1) * 512
+        |_ -> 4096 in
+        let bytes = end_offset - start_offset in
+        let subpage = Cstruct.sub (Io_page.to_cstruct page) start_offset bytes in
+        i + 1, subpage :: acc
+      ) (0, []) pages
+    )))) in
   Lwt_stream.(concat (map_s (read_single_request t) requests))
 
 let resume t =
@@ -380,13 +365,52 @@ type error =
 | Unimplemented
 | Is_read_only
 
-let read t sector_start buffers =
-  return (`Error Unimplemented)
+(* [take xs n] returns [(taken, remaining)] where [taken] is as many
+   elements of [xs] as possible, up to [n], and [remaining] is any
+   that are left over. *)
+let take xs n =
+  let rec loop taken remaining n = match n, remaining with
+  | 0, _
+  | _, [] -> List.rev taken, remaining
+  | n, x :: xs -> loop (x :: taken) xs (n - 1) in
+  loop [] xs n
 
-let write t sector_start buffers =
-  if not t.t.info.read_write
-  then return (`Error Is_read_only)
-  else return (`Error Unimplemented)
+(* Upgrade sector_size to be at least a page to guarantee read/write
+   is page-aligned as well as sector-aligned. 4k sector size disks
+   are becoming more common, so we might as well be ready. *)
+let minimum_sector_size = 4096
+
+let get_sector_size t =
+  min t.t.info.sector_size minimum_sector_size
+
+let sector t x =
+  if t.t.info.sector_size >= 4096
+  then x
+  else Int64.(div (mul x (of_int t.t.info.sector_size)) (of_int minimum_sector_size))
+
+let get_info t =
+  let info = { t.t.info with sector_size = get_sector_size t } in
+  return info
+
+let rec multiple_requests_into op t start_sector = function
+  | [] -> return ()
+  | remaining ->
+    let pages, remaining = take remaining 11 in (* 11 segments per request *)
+    lwt () = single_request_into op t start_sector pages in
+    let start_sector = Int64.(add start_sector (of_int (11 * 4096 / t.t.info.sector_size))) in
+    multiple_requests_into op t start_sector remaining
+
+let read t start_sector pages =
+  try_lwt
+    lwt () = multiple_requests_into Req.Read t (sector t start_sector) pages in
+    return (`Ok ())
+  with e -> return (`Error (Unknown (Printexc.to_string e)))
+
+let write t start_sector pages =
+  try_lwt
+    lwt () = multiple_requests_into Req.Write t (sector t start_sector) pages in
+    return (`Ok ())
+  with e -> return (`Error (Unknown (Printexc.to_string e)))
 
 let _ =
   printf "Blkif: add resume hook\n%!";
