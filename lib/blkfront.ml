@@ -400,6 +400,8 @@ let rec multiple_requests_into op t start_sector = function
     let start_sector = Int64.(add start_sector (of_int (11 * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
+let connect id = return (`Ok (Hashtbl.find devices id)) (* XXX: make this block and wait *)
+
 let read t start_sector pages =
   try_lwt
     lwt () = multiple_requests_into Req.Read t (sector t start_sector) pages in
