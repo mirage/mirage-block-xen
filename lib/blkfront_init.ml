@@ -1,5 +1,6 @@
 (*
- * Copyright (c) 2010-2011 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2011 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2012 Citrix Systems Inc
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -13,24 +14,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open OS
-(*
-type features = {
-  barrier : bool;
-  removable : bool;
-  sector_size : int64;
-  sectors : int64;
-  readwrite: bool;
-}
-*)
-include Block.S
 
-type id = string
-exception IO_error of string
-val create : id:id -> Devices.blkif Lwt.t
-val enumerate : unit -> id list Lwt.t
-val write_page : t -> int64 -> Io_page.t -> unit Lwt.t
-val read_512 : t -> int64 -> int64 -> Cstruct.t Lwt_stream.t
-val resume : unit -> unit Lwt.t
-
-val register: unit -> unit Lwt.t
+let _ =
+  OS.Block.register "local" (module Blkfront: OS.Block.S)

@@ -28,7 +28,7 @@ Library blkfront
   Path:               lib
   Findlibparent:      xenblock
   Findlibname:        front
-  Modules:            Blkfront
+  Modules:            Blkfront, Blkfront_init
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, mirage-types, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
