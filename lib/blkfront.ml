@@ -375,13 +375,18 @@ let register () =
     ) ids in
   Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
 
-type error = Unknown
+type error =
+| Unknown of string
+| Unimplemented
+| Is_read_only
 
 let read t sector_start buffers =
-  return (`Error Unknown)
+  return (`Error Unimplemented)
 
 let write t sector_start buffers =
-  return (`Error Unknown)
+  if not t.t.info.read_write
+  then return (`Error Is_read_only)
+  else return (`Error Unimplemented)
 
 let _ =
   printf "Blkif: add resume hook\n%!";
