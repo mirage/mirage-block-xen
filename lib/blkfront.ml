@@ -420,13 +420,30 @@ let connect id =
     lwt dev = t in
     return (`Ok dev)
 
+exception Buffer_is_not_page_aligned
+exception Buffer_is_more_than_one_page
+let to_iopage x =
+  if x.Cstruct.off <> 0 then raise Buffer_is_not_page_aligned;
+  if x.Cstruct.len > 4096 then raise Buffer_is_more_than_one_page;
+  x.Cstruct.buffer
+
+let to_iopages x =
+  try return (List.map to_iopage x)
+  with e -> fail e
+
+let ( >>= ) x f = match x with
+  | `Error _ -> x
+  | `Ok x -> f x
+
 let read t start_sector pages =
+  lwt pages = to_iopages pages in
   try_lwt
     lwt () = multiple_requests_into Req.Read t (sector t start_sector) pages in
     return (`Ok ())
   with e -> return (`Error (Unknown (Printexc.to_string e)))
 
 let write t start_sector pages =
+  lwt pages = to_iopages pages in
   try_lwt
     lwt () = multiple_requests_into Req.Write t (sector t start_sector) pages in
     return (`Ok ())
