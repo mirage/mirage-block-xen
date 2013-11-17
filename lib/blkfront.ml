@@ -52,6 +52,8 @@ exception IO_error of string
 (** Set of active block devices *)
 let devices : (id, t) Hashtbl.t = Hashtbl.create 1
 
+let devices_waiters : (id, t Lwt.u Lwt_sequence.t) Hashtbl.t = Hashtbl.create 1
+
 let h = Eventchn.init ()
 
 (* Allocate a ring, given the vdev and backend domid *)
@@ -319,6 +321,10 @@ let create ~id : Devices.blkif Lwt.t =
   let dev = { vdev = int_of_string id;
  	      t = trans } in
   Hashtbl.add devices id dev;
+  if Hashtbl.mem devices_waiters id then begin
+    Lwt_sequence.iter_l (fun u -> Lwt.wakeup_later u dev) (Hashtbl.find devices_waiters id);
+    Hashtbl.remove devices_waiters id
+  end;
   printf "Xen.Blkif: success\n%!";
   return (object
     method id = id
@@ -400,7 +406,19 @@ let rec multiple_requests_into op t start_sector = function
     let start_sector = Int64.(add start_sector (of_int (11 * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
-let connect id = return (`Ok (Hashtbl.find devices id)) (* XXX: make this block and wait *)
+let connect id =
+  if Hashtbl.mem devices id
+  then return (`Ok (Hashtbl.find devices id))
+  else
+    let t, u = Lwt.task () in
+    let seq =
+       if Hashtbl.mem devices_waiters id
+       then Hashtbl.find devices_waiters id
+       else Lwt_sequence.create () in
+    let (_: t Lwt.u Lwt_sequence.node) = Lwt_sequence.add_r u seq in
+    Hashtbl.replace devices_waiters id seq;
+    lwt dev = t in
+    return (`Ok dev)
 
 let read t start_sector pages =
   try_lwt
