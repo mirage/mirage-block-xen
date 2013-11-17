@@ -15,5 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-let _ =
-  OS.Block.register "local" (module Blkfront: OS.Block.S)
+let register () =
+  OS.Block.register "local" (module Blkfront: OS.Block.S);
+  Blkfront.register ()
