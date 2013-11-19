@@ -14,16 +14,10 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 open OS
-(*
-type features = {
-  barrier : bool;
-  removable : bool;
-  sector_size : int64;
-  sectors : int64;
-  readwrite: bool;
-}
-*)
+
 include Block.S
+
+(** {2} Legacy interface *)
 
 type id = string
 exception IO_error of string
