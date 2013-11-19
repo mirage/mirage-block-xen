@@ -387,15 +387,17 @@ let take xs n =
 let minimum_sector_size = 4096
 
 let get_sector_size t =
-  min t.t.info.sector_size minimum_sector_size
+  max t.t.info.sector_size minimum_sector_size
 
 let sector t x =
   if t.t.info.sector_size >= 4096
   then x
-  else Int64.(div (mul x (of_int t.t.info.sector_size)) (of_int minimum_sector_size))
+  else Int64.(div (mul x (of_int minimum_sector_size)) (of_int t.t.info.sector_size))
 
 let get_info t =
-  let info = { t.t.info with sector_size = get_sector_size t } in
+  let sector_size = get_sector_size t in
+  let size_sectors = Int64.(div t.t.info.size_sectors (of_int (sector_size / t.t.info.sector_size))) in
+  let info = { t.t.info with sector_size; size_sectors } in
   return info
 
 let rec multiple_requests_into op t start_sector = function
