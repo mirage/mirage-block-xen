@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 7bd900b7024f84f0fb74d6e39d9969bc)
+# DO NOT EDIT (digest: fa8d6474a1a5bb6911b0fb034ee12cc9)
 # Ignore VCS directories, you can use the same kind of rule outside 
 # OASIS_START/STOP if you want to exclude directories that contains 
 # useless stuff for the build process
@@ -17,6 +17,7 @@
 "lib/xenblock.cmxs": use_xenblock
 # Library blkfront
 "lib/blkfront.cmxs": use_blkfront
+<lib/*.ml{,i}>: pkg_mirage-types
 # Library blkback
 "lib/blkback.cmxs": use_blkback
 <lib/*.ml{,i}>: use_xenblock
