@@ -1,3 +1,6 @@
+trunk (unreleased)
+* implement new mirage-types BLOCK interface
+
 0.2.5 (10-Nov-2013)
 * fix build against cstruct.0.8.0
 * blkfront write_page only needs to grant read access to
