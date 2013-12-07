@@ -1,7 +1,7 @@
 .PHONY: all clean install build
 all: build doc
 
-NAME=xenblock
+NAME=mirage-block-xen
 J=4
 
 include config.mk

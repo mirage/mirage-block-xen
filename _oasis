@@ -1,5 +1,5 @@
 OASISFormat: 0.3
-Name:        ocaml-xen-block-driver
+Name:        mirage-block-xen
 Version:     0.9.9
 Synopsis:    Xen block frontend and backend driver implementation
 Authors:     Jonathan Ludlam, Anil Madhavapeddy, David Scott
@@ -15,27 +15,27 @@ Flag blkback
   Default:            true
   Description:        build the backend driver
 
-Library xenblock
+Library mirage_block_xen
   CompiledObject:     best
   Path:               lib
-  Findlibname:        xenblock
+  Findlibname:        mirage-block-xen
   Modules:            Blkproto, Device_number
   BuildDepends:       cstruct, cstruct.syntax
 
-Library blkfront
+Library mirage_block_xen_front
   Build$:             flag(blkfront)
   CompiledObject:     best
   Path:               lib
-  Findlibparent:      xenblock
+  Findlibparent:      mirage_block_xen
   Findlibname:        front
   Modules:            Blkfront
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-xen, mirage-types, shared-memory-ring, shared-memory-ring.lwt, xenblock
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-types, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen
 
-Library blkback
+Library mirage_block_xen_back
   Build$:             flag(blkback)
   CompiledObject:     best
   Path:               lib
-  Findlibparent:      xenblock
+  Findlibparent:      mirage_block_xen
   Findlibname:        back
   Modules:            Blkback
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-xen, shared-memory-ring, shared-memory-ring.lwt, xenblock, xenctrl
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xenctrl

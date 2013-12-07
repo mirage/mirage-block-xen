@@ -1,5 +1,5 @@
 (* OASIS_START *)
-(* DO NOT EDIT (digest: aee8fcfff34b1538ccdf14a6c14d885f) *)
+(* DO NOT EDIT (digest: 545eb020955241de08b9c238046ed368) *)
 module OASISGettext = struct
 (* # 21 "src/oasis/OASISGettext.ml" *)
 
@@ -478,7 +478,11 @@ open Ocamlbuild_plugin;;
 let package_default =
   {
      MyOCamlbuildBase.lib_ocaml =
-       [("xenblock", ["lib"]); ("blkfront", ["lib"]); ("blkback", ["lib"])];
+       [
+          ("mirage_block_xen", ["lib"]);
+          ("mirage_block_xen_front", ["lib"]);
+          ("mirage_block_xen_back", ["lib"])
+       ];
      lib_c = [];
      flags = [];
      includes = [];
@@ -487,6 +491,6 @@ let package_default =
 
 let dispatch_default = MyOCamlbuildBase.dispatch_default package_default;;
 
-# 491 "myocamlbuild.ml"
+# 495 "myocamlbuild.ml"
 (* OASIS_STOP *)
 Ocamlbuild_plugin.dispatch dispatch_default;;
