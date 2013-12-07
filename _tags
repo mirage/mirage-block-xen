@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 331d59dcafd1cda8cb8d9461461b5927)
+# DO NOT EDIT (digest: b80f2d33761f6766cf984d438d7dd8f0)
 # Ignore VCS directories, you can use the same kind of rule outside 
 # OASIS_START/STOP if you want to exclude directories that contains 
 # useless stuff for the build process
@@ -13,19 +13,18 @@
 ".git": not_hygienic
 "_darcs": -traverse
 "_darcs": not_hygienic
-# Library xenblock
-"lib/xenblock.cmxs": use_xenblock
-# Library blkfront
-"lib/blkfront.cmxs": use_blkfront
+# Library mirage_block_xen
+"lib/mirage_block_xen.cmxs": use_mirage_block_xen
+# Library mirage_block_xen_front
+"lib/mirage_block_xen_front.cmxs": use_mirage_block_xen_front
 <lib/*.ml{,i}>: pkg_mirage-types
-# Library blkback
-"lib/blkback.cmxs": use_blkback
-<lib/*.ml{,i}>: use_xenblock
+# Library mirage_block_xen_back
+"lib/mirage_block_xen_back.cmxs": use_mirage_block_xen_back
+<lib/*.ml{,i}>: use_mirage_block_xen
 <lib/*.ml{,i}>: pkg_lwt
 <lib/*.ml{,i}>: pkg_lwt.syntax
 <lib/*.ml{,i}>: pkg_cstruct
 <lib/*.ml{,i}>: pkg_cstruct.syntax
-<lib/*.ml{,i}>: pkg_mirage-xen
 <lib/*.ml{,i}>: pkg_shared-memory-ring
 <lib/*.ml{,i}>: pkg_shared-memory-ring.lwt
 <lib/*.ml{,i}>: pkg_xenctrl
