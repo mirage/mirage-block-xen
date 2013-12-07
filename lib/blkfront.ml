@@ -23,7 +23,7 @@ open Gnt
 
 type 'a io = 'a Lwt.t
 
-type page_aligned_buffer = Io_page.t
+type page_aligned_buffer = Cstruct.t
 
 type info = {
   read_write: bool;
@@ -153,8 +153,7 @@ let plug (id:id) =
 (* Unplug shouldn't block, although the Xen one might need to due
    to Xenstore? XXX *)
 let unplug id =
-  Console.log (sprintf "Blkif.unplug %s: not implemented yet" id);
-  ()
+  printf "Blkif.unplug %s: not implemented yet\n" id
 
 (** Return a list of valid VBDs *)
 let enumerate () =
@@ -165,7 +164,7 @@ let enumerate () =
     | Xs_protocol.Enoent _ ->
       return []
     | e ->
-      Console.log (sprintf "Blkif.enumerate caught exception: %s" (Printexc.to_string e));
+      printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
       return []
 
 (** [single_request_into op t start_sector start_offset end_offset pages]
@@ -315,61 +314,15 @@ let resume () =
   let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
   Lwt_list.iter_p (fun (k,v) -> resume v) devs
 
-let create ~id : Devices.blkif Lwt.t =
-  printf "Xen.Blkif: create %s\n%!" id;
-  lwt trans = plug id in
-  let dev = { vdev = int_of_string id;
- 	      t = trans } in
-  Hashtbl.add devices id dev;
-  if Hashtbl.mem devices_waiters id then begin
-    Lwt_sequence.iter_l (fun u -> Lwt.wakeup_later u dev) (Hashtbl.find devices_waiters id);
-    Hashtbl.remove devices_waiters id
-  end;
-  printf "Xen.Blkif: success\n%!";
-  return (object
-    method id = id
-    method read_512 = read_512 dev
-    method write_page = write_page dev
-    method sector_size = 4096
-    method size = Int64.(mul dev.t.info.size_sectors (of_int dev.t.info.sector_size))
-    method readwrite = dev.t.info.read_write
-    method ppname = sprintf "Xen.blkif:%s" id
-    method destroy = unplug id
-  end)
-
-(* Register Xen.Blkif provider with the device manager *)
-let register () =
-  printf "Xen.Blkfront.register\n%!";
-  let plug_mvar = Lwt_mvar.create_empty () in
-  let unplug_mvar = Lwt_mvar.create_empty () in
-  let provider = object(self)
-     method id = "Xen.Blkif"
-     method plug = plug_mvar 
-     method unplug = unplug_mvar
-     method create ~deps ~cfg id =
-	  (* no cfg required: we will check xenstore instead *)
-      lwt blkif = create ~id in
-      let entry = Devices.({
-        provider=self; 
-        id=self#id; 
-        depends=[];
-        node=Blkif blkif }) in
-      return entry
-  end in
-  Devices.new_provider provider;
-  (* Iterate over the plugged in VBDs and plug them in *)
-  lwt ids = enumerate () in
-  Console.log (sprintf "Blkif.enumerate found ids [ %s ]" (String.concat "; " ids));
-    let vbds = List.map (fun id ->
-      printf "found VBD with id: %s\n%!" id;
-      { Devices.p_dep_ids = []; p_cfg = []; p_id = id }
-    ) ids in
-  Lwt_list.iter_s (Lwt_mvar.put plug_mvar) vbds
+let disconnect _id =
+  printf "Blkfront: disconnect not implement yet\n";
+  return ()
 
 type error =
-| Unknown of string
-| Unimplemented
-| Is_read_only
+  [ `Disconnected
+  | `Is_read_only
+  | `Unimplemented
+  | `Unknown of string ]
 
 (* [take xs n] returns [(taken, remaining)] where [taken] is as many
    elements of [xs] as possible, up to [n], and [remaining] is any
@@ -442,14 +395,14 @@ let read t start_sector pages =
   try_lwt
     lwt () = multiple_requests_into Req.Read t (sector t start_sector) pages in
     return (`Ok ())
-  with e -> return (`Error (Unknown (Printexc.to_string e)))
+  with e -> return (`Error (`Unknown (Printexc.to_string e)))
 
 let write t start_sector pages =
   lwt pages = to_iopages pages in
   try_lwt
     lwt () = multiple_requests_into Req.Write t (sector t start_sector) pages in
     return (`Ok ())
-  with e -> return (`Error (Unknown (Printexc.to_string e)))
+  with e -> return (`Error (`Unknown (Printexc.to_string e)))
 
 let _ =
   printf "Blkif: add resume hook\n%!";
