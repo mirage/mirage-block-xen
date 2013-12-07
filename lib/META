@@ -1,6 +1,6 @@
 # OASIS_START
-# DO NOT EDIT (digest: 29112410a7cdc0a8cf0173c510bb7667)
-version = "0.2.4"
+# DO NOT EDIT (digest: 23dd5356ed801dd35f2cee4a1959c72c)
+version = "0.9.9"
 description = "Xen block frontend and backend driver implementation"
 requires = "cstruct cstruct.syntax"
 archive(byte) = "xenblock.cma"
@@ -9,10 +9,10 @@ archive(native) = "xenblock.cmxa"
 archive(native, plugin) = "xenblock.cmxs"
 exists_if = "xenblock.cma"
 package "front" (
- version = "0.2.4"
+ version = "0.9.9"
  description = "Xen block frontend and backend driver implementation"
  requires =
- "lwt lwt.syntax cstruct cstruct.syntax mirage mirage-types shared-memory-ring shared-memory-ring.lwt xenblock"
+ "lwt lwt.syntax cstruct cstruct.syntax mirage-xen mirage-types shared-memory-ring shared-memory-ring.lwt xenblock"
  archive(byte) = "blkfront.cma"
  archive(byte, plugin) = "blkfront.cma"
  archive(native) = "blkfront.cmxa"
@@ -21,10 +21,10 @@ package "front" (
 )
 
 package "back" (
- version = "0.2.4"
+ version = "0.9.9"
  description = "Xen block frontend and backend driver implementation"
  requires =
- "lwt lwt.syntax cstruct cstruct.syntax mirage shared-memory-ring shared-memory-ring.lwt xenblock xenctrl"
+ "lwt lwt.syntax cstruct cstruct.syntax mirage-xen shared-memory-ring shared-memory-ring.lwt xenblock xenctrl"
  archive(byte) = "blkback.cma"
  archive(byte, plugin) = "blkback.cma"
  archive(native) = "blkback.cmxa"

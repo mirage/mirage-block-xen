@@ -15,16 +15,7 @@
  *)
 open OS
 
-include Block.S
-
-(** {2} Legacy interface *)
-
-type id = string
-exception IO_error of string
-val create : id:id -> Devices.blkif Lwt.t
-val enumerate : unit -> id list Lwt.t
-val write_page : t -> int64 -> Io_page.t -> unit Lwt.t
-val read_512 : t -> int64 -> int64 -> Cstruct.t Lwt_stream.t
-val resume : unit -> unit Lwt.t
-
-val register: unit -> unit Lwt.t
+include V1.BLOCK.CLIENT
+with type 'a io = 'a Lwt.t
+and type     page_aligned_buffer = Cstruct.t
+and type     id = string
