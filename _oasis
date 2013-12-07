@@ -1,6 +1,6 @@
 OASISFormat: 0.3
 Name:        ocaml-xen-block-driver
-Version:     0.2.4
+Version:     0.9.9
 Synopsis:    Xen block frontend and backend driver implementation
 Authors:     Jonathan Ludlam, Anil Madhavapeddy, David Scott
 License:     ISC
@@ -28,8 +28,8 @@ Library blkfront
   Path:               lib
   Findlibparent:      xenblock
   Findlibname:        front
-  Modules:            Blkfront, Blkfront_init
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, mirage-types, shared-memory-ring, shared-memory-ring.lwt, xenblock
+  Modules:            Blkfront
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-xen, mirage-types, shared-memory-ring, shared-memory-ring.lwt, xenblock
 
 Library blkback
   Build$:             flag(blkback)
@@ -38,4 +38,4 @@ Library blkback
   Findlibparent:      xenblock
   Findlibname:        back
   Modules:            Blkback
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage, shared-memory-ring, shared-memory-ring.lwt, xenblock, xenctrl
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-xen, shared-memory-ring, shared-memory-ring.lwt, xenblock, xenctrl
