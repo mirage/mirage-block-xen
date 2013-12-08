@@ -375,6 +375,8 @@ let connect id =
     lwt dev = t in
     return (`Ok dev)
 
+let id t = string_of_int t.vdev
+
 exception Buffer_is_not_page_aligned
 exception Buffer_is_more_than_one_page
 let to_iopage x =
