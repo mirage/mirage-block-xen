@@ -365,15 +365,22 @@ let connect id =
   if Hashtbl.mem devices id
   then return (`Ok (Hashtbl.find devices id))
   else
-    let t, u = Lwt.task () in
-    let seq =
-       if Hashtbl.mem devices_waiters id
-       then Hashtbl.find devices_waiters id
-       else Lwt_sequence.create () in
-    let (_: t Lwt.u Lwt_sequence.node) = Lwt_sequence.add_r u seq in
-    Hashtbl.replace devices_waiters id seq;
-    lwt dev = t in
-    return (`Ok dev)
+    (* If [id] is an integer, use it. Otherwise default to the first
+       available disk. *)
+    lwt all = enumerate () in
+    let id' = if List.mem id all then Some id
+             else (if all = [] then None else Some (List.hd all)) in
+    match id' with
+    | Some id' ->
+      printf "Block.connect %s -> %s\n%!" id id';
+      lwt trans = plug id' in
+      let dev = { vdev = int_of_string id';
+                  t = trans } in
+      Hashtbl.add devices id' dev;
+      return (`Ok dev)
+    | None ->
+      printf "Block.connect %s: could not find device\n" id;
+      return (`Error (`Unknown (Printf.sprintf "device %s not found (available = [ %s ])" id (String.concat ", " all)))) 
 
 let id t = string_of_int t.vdev
 
