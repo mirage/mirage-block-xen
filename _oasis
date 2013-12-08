@@ -28,7 +28,7 @@ Library mirage_block_xen_front
   Path:               lib
   Findlibparent:      mirage_block_xen
   Findlibname:        front
-  Modules:            Blkfront
+  Modules:            Blkfront, Block
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-types, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen
 
 Library mirage_block_xen_back
