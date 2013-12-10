@@ -64,7 +64,9 @@ let alloc ~order (num,domid) =
 
   let pages = Io_page.to_pages buf in
   lwt gnts = Gntshr.get_n (List.length pages) in
-  List.iter (fun (gnt, page) -> Gntshr.grant_access ~domid ~writeable:true gnt page) (List.combine gnts pages);
+  List.iter (fun (gnt, page) -> 
+      Gntshr.grant_access ~domid ~writeable:true gnt page) 
+    (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
   printf "Blkfront %s\n%!" (Ring.Rpc.to_summary_string sring);
@@ -95,10 +97,10 @@ let plug (id:id) =
 
   let backend_read fn default k =
     let backend = sprintf "%s/%s" backend in
-      try_lwt
-        lwt s = Xs.(immediate xs (fun h -> read h (backend k))) in
-        return (fn s)
-      with exn -> return default in
+    try_lwt
+      lwt s = Xs.(immediate xs (fun h -> read h (backend k))) in
+      return (fn s)
+    with exn -> return default in
 
   (* The backend can advertise a multi-page ring: *)
   lwt backend_max_ring_page_order = backend_read int_of_string 0 "max-ring-page-order" in
@@ -108,7 +110,10 @@ let plug (id:id) =
 
   let our_max_ring_page_order = 2 in (* 4 pages *)
   let ring_page_order = min our_max_ring_page_order backend_max_ring_page_order in
-  printf "Negotiated a %s\n%!" (if ring_page_order = 0 then "singe-page ring" else sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
+  printf "Negotiated a %s\n%!" 
+    (if ring_page_order = 0 then 
+       "single-page ring" else 
+       sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
 
   lwt (gnts, ring, client) = alloc ~order:ring_page_order (vdev,backend_id) in
   let evtchn = Eventchn.bind_unbound_port h backend_id in
@@ -116,8 +121,8 @@ let plug (id:id) =
   let ring_info =
     (* The new protocol writes (ring-refN = G) where N=0,1,2 *)
     let rfs = snd(List.fold_left (fun (i, acc) g ->
-      i + 1, ((sprintf "ring-ref%d" i, string_of_int g) :: acc)
-    ) (0, []) gnts) in
+        i + 1, ((sprintf "ring-ref%d" i, string_of_int g) :: acc)
+      ) (0, []) gnts) in
     if ring_page_order = 0
     then [ "ring-ref", string_of_int (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
@@ -127,12 +132,12 @@ let plug (id:id) =
     "state", Device_state.(to_string Connected)
   ] @ ring_info in
   lwt () = Xs.(transaction xs (fun h ->
-    Lwt_list.iter_s (fun (k, v) -> write h (node k) v) info
-  )) in
+      Lwt_list.iter_s (fun (k, v) -> write h (node k) v) info
+    )) in
   lwt () = Xs.(wait xs (fun h ->
-    lwt state = read h (sprintf "%s/state" backend) in
-    if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
-  )) in
+      lwt state = read h (sprintf "%s/state" backend) in
+      if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
+    )) in
   (* Read backend info *)
   lwt info =
     lwt state = backend_read (Device_state.of_string) Device_state.Unknown "state" in
@@ -161,11 +166,11 @@ let enumerate () =
   try_lwt
     Xs.(immediate xs (fun h -> directory h "device/vbd"))
   with
-    | Xs_protocol.Enoent _ ->
-      return []
-    | e ->
-      printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
-      return []
+  | Xs_protocol.Enoent _ ->
+    return []
+  | e ->
+    printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
+    return []
 
 (** [single_request_into op t start_sector start_offset end_offset pages]
     issues a single request [op], starting at [start_sector] and using
@@ -179,40 +184,40 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
     try_lwt
       Gntshr.with_refs len
         (fun rs ->
-          Gntshr.with_grants ~domid:t.t.backend_id ~writeable:(op = Req.Read) rs pages
-            (fun () ->
-              let segs = Array.mapi
-                (fun i rf ->
-                  let first_sector = match i with
-                    | 0 -> start_offset
-                    | _ -> 0 in
-                  let last_sector = match i with
-                    | n when n == len-1 -> end_offset
-                    | _ -> 7 in
-                  let gref = Int32.of_int rf in
-                  { Req.gref; first_sector; last_sector }
-                ) (Array.of_list rs) in
-              let id = Int64.of_int (List.hd rs) in
-              let sector = Int64.(add start_sector (of_int start_offset)) in
-              let req = Req.({ op=Some op; handle=t.vdev; id; sector; segs }) in
-              lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-                (fun () -> Eventchn.notify h t.t.evtchn)
-                (Req.Proto_64.write_request req) in
-              let open Res in
-              match res.st with
-              | Some Error -> fail (IO_error "read")
-              | Some Not_supported -> fail (IO_error "unsupported")
-              | None -> fail (IO_error "unknown error")
-              | Some OK -> return ()
-            )
-          )
+           Gntshr.with_grants ~domid:t.t.backend_id ~writeable:(op = Req.Read) rs pages
+             (fun () ->
+                let segs = Array.mapi
+                    (fun i rf ->
+                       let first_sector = match i with
+                         | 0 -> start_offset
+                         | _ -> 0 in
+                       let last_sector = match i with
+                         | n when n == len-1 -> end_offset
+                         | _ -> 7 in
+                       let gref = Int32.of_int rf in
+                       { Req.gref; first_sector; last_sector }
+                    ) (Array.of_list rs) in
+                let id = Int64.of_int (List.hd rs) in
+                let sector = Int64.(add start_sector (of_int start_offset)) in
+                let req = Req.({ op=Some op; handle=t.vdev; id; sector; segs }) in
+                lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
+                    (fun () -> Eventchn.notify h t.t.evtchn)
+                    (Req.Proto_64.write_request req) in
+                let open Res in
+                match res.st with
+                | Some Error -> fail (IO_error "read")
+                | Some Not_supported -> fail (IO_error "unsupported")
+                | None -> fail (IO_error "unknown error")
+                | Some OK -> return ()
+             )
+        )
     with
     | Lwt_ring.Shutdown -> retry ()
     | exn -> fail exn in
   retry ()
 
 (* THIS FUNCTION IS DEPRECATED. Use 'write' instead.
-   
+
    Write a single page to disk.
    Offset is in bytes, which must be sector-aligned
    Page must be an Io_page *)
@@ -224,7 +229,7 @@ let rec write_page t offset page =
 
 
 (* THIS FUNCTION IS DEPRECATED. Use 'read' instead.
- 
+
    Reads [num_sectors] starting at [sector], returning a stream of Io_page.ts *)
 let read_512 t sector num_sectors =
   let module Single_request = struct
@@ -270,36 +275,40 @@ let read_512 t sector num_sectors =
       let state = ref (Some (sector, num_sectors)) in
       Lwt_stream.from
         (fun () ->
-          match !state with
-          | None -> return None
-          | Some x ->
-            let item, state' = from x in
-            state := state';
-            return (Some item)
+           match !state with
+           | None -> return None
+           | Some x ->
+             let item, state' = from x in
+             state := state';
+             return (Some item)
         )
 
-      let list_of sector num_sectors =
-        Lwt_stream.to_list (stream_of sector num_sectors)
+    let list_of sector num_sectors =
+      Lwt_stream.to_list (stream_of sector num_sectors)
   end in
   let requests = Single_request.stream_of sector num_sectors in
   let read_single_request t r =
     let open Single_request in
     let len = npages_of r in
     let pages = Io_page.(to_pages (get len)) in
-    lwt () = single_request_into Req.Read t r.start_sector ~start_offset:r.start_offset ~end_offset:r.end_offset pages in
-    return (Lwt_stream.of_list (List.rev (snd (List.fold_left
-      (fun (i, acc) page ->
-        let start_offset = match i with
-        |0 -> r.start_offset * 512
-        |_ -> 0 in
-        let end_offset = match i with
-        |n when n = len-1 -> (r.end_offset + 1) * 512
-        |_ -> 4096 in
-        let bytes = end_offset - start_offset in
-        let subpage = Cstruct.sub (Io_page.to_cstruct page) start_offset bytes in
-        i + 1, subpage :: acc
-      ) (0, []) pages
-    )))) in
+    lwt () = single_request_into Req.Read t r.start_sector 
+        ~start_offset:r.start_offset ~end_offset:r.end_offset pages in
+    return (Lwt_stream.of_list 
+              (List.rev 
+                 (snd 
+                    (List.fold_left
+                       (fun (i, acc) page ->
+                          let start_offset = match i with
+                            |0 -> r.start_offset * 512
+                            |_ -> 0 in
+                          let end_offset = match i with
+                            |n when n = len-1 -> (r.end_offset + 1) * 512
+                            |_ -> 4096 in
+                          let bytes = end_offset - start_offset in
+                          let subpage = Cstruct.sub (Io_page.to_cstruct page) start_offset bytes in
+                          i + 1, subpage :: acc
+                       ) (0, []) pages
+                    )))) in
   Lwt_stream.(concat (map_s (read_single_request t) requests))
 
 let resume t =
@@ -329,9 +338,9 @@ type error =
    that are left over. *)
 let take xs n =
   let rec loop taken remaining n = match n, remaining with
-  | 0, _
-  | _, [] -> List.rev taken, remaining
-  | n, x :: xs -> loop (x :: taken) xs (n - 1) in
+    | 0, _
+    | _, [] -> List.rev taken, remaining
+    | n, x :: xs -> loop (x :: taken) xs (n - 1) in
   loop [] xs n
 
 (* Upgrade sector_size to be at least a page to guarantee read/write
@@ -349,7 +358,9 @@ let sector t x =
 
 let get_info t =
   let sector_size = get_sector_size t in
-  let size_sectors = Int64.(div t.t.info.size_sectors (of_int (sector_size / t.t.info.sector_size))) in
+  let size_sectors = Int64.(
+      div t.t.info.size_sectors 
+        (of_int (sector_size / t.t.info.sector_size))) in
   let info = { t.t.info with sector_size; size_sectors } in
   return info
 
@@ -369,7 +380,7 @@ let connect id =
        available disk. *)
     lwt all = enumerate () in
     let id' = if List.mem id all then Some id
-             else (if all = [] then None else Some (List.hd all)) in
+      else (if all = [] then None else Some (List.hd all)) in
     match id' with
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
@@ -380,7 +391,9 @@ let connect id =
       return (`Ok dev)
     | None ->
       printf "Block.connect %s: could not find device\n" id;
-      return (`Error (`Unknown (Printf.sprintf "device %s not found (available = [ %s ])" id (String.concat ", " all)))) 
+      return (`Error (`Unknown 
+                        (Printf.sprintf "device %s not found (available = [ %s ])" 
+                           id (String.concat ", " all)))) 
 
 let id t = string_of_int t.vdev
 
