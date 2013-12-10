@@ -1,3 +1,7 @@
+1.0.0 (10-Dec-2013):
+* Add ISC copyrights everywhere.
+* Indent code with `ocp-indent`.
+
 0.5.0 (8-Dec-2013)
 * Block.connect: if we don't recognise the id, default to the
   first available disk.
