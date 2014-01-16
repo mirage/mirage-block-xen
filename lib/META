@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: fe313703bd7172422c71fc63812ff05c)
+# DO NOT EDIT (digest: efe5b21321734e5e3e70c08c5a306ac8)
 version = "1.0.0"
 description = "Xen block frontend and backend driver implementation"
 requires = "cstruct cstruct.syntax"
@@ -12,7 +12,7 @@ package "front" (
  version = "1.0.0"
  description = "Xen block frontend and backend driver implementation"
  requires =
- "lwt lwt.syntax cstruct cstruct.syntax mirage-types shared-memory-ring shared-memory-ring.lwt mirage-block-xen"
+ "lwt lwt.syntax cstruct cstruct.syntax mirage-types io-page shared-memory-ring shared-memory-ring.lwt mirage-block-xen"
  archive(byte) = "mirage_block_xen_front.cma"
  archive(byte, plugin) = "mirage_block_xen_front.cma"
  archive(native) = "mirage_block_xen_front.cmxa"
@@ -24,7 +24,7 @@ package "back" (
  version = "1.0.0"
  description = "Xen block frontend and backend driver implementation"
  requires =
- "lwt lwt.syntax cstruct cstruct.syntax shared-memory-ring shared-memory-ring.lwt mirage-block-xen xenctrl"
+ "lwt lwt.syntax cstruct cstruct.syntax io-page shared-memory-ring shared-memory-ring.lwt mirage-block-xen xenctrl"
  archive(byte) = "mirage_block_xen_back.cma"
  archive(byte, plugin) = "mirage_block_xen_back.cma"
  archive(native) = "mirage_block_xen_back.cmxa"

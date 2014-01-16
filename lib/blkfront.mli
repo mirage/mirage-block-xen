@@ -13,8 +13,6 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-open OS
-
 include V1.BLOCK
 with type 'a io = 'a Lwt.t
 and type     page_aligned_buffer = Cstruct.t

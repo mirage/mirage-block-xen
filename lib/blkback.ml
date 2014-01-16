@@ -17,7 +17,6 @@
 
 open Lwt
 open Printf
-open OS
 open Blkproto
 open Gnt
 
