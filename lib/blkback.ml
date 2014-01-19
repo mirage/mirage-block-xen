@@ -52,6 +52,7 @@ end
 
 let empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
 
+module Make(A: S.ACTIVATIONS) = struct
 let service_thread t =
   let rec loop_forever () =
     (* For all the requests on the ring, build up a list of
@@ -157,10 +158,9 @@ let service_thread t =
       if notify then Eventchn.notify t.xe t.evtchn;
       return () in
 
-    lwt () = Activations.wait t.evtchn in
+    lwt () = A.wait t.evtchn in
     loop_forever () in
   loop_forever ()
-
 
 let init xg xe domid ring_info wait ops =
   let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
@@ -183,3 +183,4 @@ let init xg xe domid ring_info wait ops =
     let th = service_thread t in
     on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
     th
+end
