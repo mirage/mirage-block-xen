@@ -7,14 +7,6 @@ License:     ISC
 Plugins:     META (0.3)
 BuildTools:  ocamlbuild
 
-Flag blkfront
-  Default:            true
-  Description:        build the frontend driver
-
-Flag blkback
-  Default:            true
-  Description:        build the backend driver
-
 Library mirage_block_xen
   CompiledObject:     best
   Path:               lib
@@ -23,16 +15,14 @@ Library mirage_block_xen
   BuildDepends:       cstruct, cstruct.syntax
 
 Library mirage_block_xen_front
-  Build$:             flag(blkfront)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      mirage_block_xen
   Findlibname:        front
   Modules:            Blkfront, Block
-  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-event, xen-grant
+  BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-event, xen-grant, mirage-xen
 
 Library mirage_block_xen_back
-  Build$:             flag(blkback)
   CompiledObject:     best
   Path:               lib
   Findlibparent:      mirage_block_xen

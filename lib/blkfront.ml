@@ -19,6 +19,7 @@ open Lwt
 open Printf
 open Blkproto
 open Gnt
+open OS
 
 type 'a io = 'a Lwt.t
 
@@ -64,7 +65,7 @@ let alloc ~order (num,domid) =
   let pages = Io_page.to_pages buf in
   lwt gnts = Gntshr.get_n (List.length pages) in
   List.iter (fun (gnt, page) -> 
-      Gntshr.grant_access ~domid ~writeable:true gnt page) 
+      Gntshr.grant_access ~domid ~writable:true gnt page) 
     (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
@@ -183,7 +184,7 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
     try_lwt
       Gntshr.with_refs len
         (fun rs ->
-           Gntshr.with_grants ~domid:t.t.backend_id ~writeable:(op = Req.Read) rs pages
+           Gntshr.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
              (fun () ->
                 let segs = Array.mapi
                     (fun i rf ->
