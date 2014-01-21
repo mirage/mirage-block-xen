@@ -2,6 +2,7 @@
 * blkback: functorise over Activations.
 * Depend on `xen-grant` and `xen-event` libraries rather than `xenctrl`.
 * Remove `OS` module, depend on `io-page` (no `-unix` or `-xen`).
+* Only use the high-level Activations.after interface.
 
 1.0.0 (10-Dec-2013):
 * Add ISC copyrights everywhere.
