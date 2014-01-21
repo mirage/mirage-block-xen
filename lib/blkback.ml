@@ -54,7 +54,7 @@ let empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
 
 module Make(A: S.ACTIVATIONS) = struct
 let service_thread t =
-  let rec loop_forever () =
+  let rec loop_forever after =
     (* For all the requests on the ring, build up a list of
        writable and readonly grants. We will map and unmap these
        as a batch. *)
@@ -158,9 +158,9 @@ let service_thread t =
       if notify then Eventchn.notify t.xe t.evtchn;
       return () in
 
-    lwt () = A.wait t.evtchn in
-    loop_forever () in
-  loop_forever ()
+    lwt next = A.after t.evtchn after in
+    loop_forever next in
+  loop_forever A.program_start
 
 let init xg xe domid ring_info wait ops =
   let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
