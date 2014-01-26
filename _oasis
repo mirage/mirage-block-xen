@@ -11,7 +11,7 @@ Library mirage_block_xen
   CompiledObject:     best
   Path:               lib
   Findlibname:        mirage-block-xen
-  Modules:            Blkproto, Device_number, S
+  Modules:            Blkproto, Device_number
   BuildDepends:       cstruct, cstruct.syntax
 
 Library mirage_block_xen_front
