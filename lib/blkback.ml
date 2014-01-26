@@ -1,6 +1,6 @@
 (*
- * Copyright (c) 2011 Anil Madhavapeddy <anil@recoil.org>
- * Copyright (c) 2012 Citrix Systems Inc
+ * Copyright (c) 2010-2011 Anil Madhavapeddy <anil@recoil.org>
+ * Copyright (c) 2012-14 Citrix Systems Inc
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,6 +14,25 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
+
+module type ACTIVATIONS = sig
+
+(** Event channels handlers. *)
+
+type event
+(** identifies the an event notification received from xen *)
+
+val program_start: event
+(** represents an event which 'fired' when the program started *)
+
+val after: Eventchn.t -> event -> event Lwt.t
+(** [next channel event] blocks until the system receives an event
+    newer than [event] on channel [channel]. If an event is received
+    while we aren't looking then this will be remembered and the
+    next call to [after] will immediately unblock. If the system
+    is suspended and then resumed, all event channel bindings are invalidated
+    and this function will fail with Generation.Invalid *)
+end
 
 open Lwt
 open Printf
@@ -52,7 +71,7 @@ end
 
 let empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
 
-module Make(A: S.ACTIVATIONS) = struct
+module Make(A: ACTIVATIONS) = struct
 let service_thread t =
   let rec loop_forever after =
     (* For all the requests on the ring, build up a list of
