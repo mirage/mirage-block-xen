@@ -40,8 +40,8 @@ open Blkproto
 open Gnt
 
 type ops = {
-  read : Io_page.t -> int64 -> int -> int -> unit Lwt.t;
-  write : Io_page.t -> int64 -> int -> int -> unit Lwt.t;
+  read : int64 -> Cstruct.t list -> unit Lwt.t;
+  write : int64 -> Cstruct.t list -> unit Lwt.t;
 }
 
 type ('a, 'b) t = {
@@ -69,7 +69,7 @@ module Opt = struct
     | Some x -> x
 end
 
-let empty = Bigarray.Array1.create Bigarray.char Bigarray.c_layout 0
+let empty = Cstruct.create 0
 
 module Make(A: ACTIVATIONS) = struct
 let service_thread t =
@@ -129,9 +129,9 @@ let service_thread t =
     let readonly_mapping = maybe_mapv false !readonly_grants in
 
     let writable_buffer = 
-      Opt.(default empty (map Gnttab.Local_mapping.to_buf writable_mapping)) in
+      Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) writable_mapping)) in
     let readonly_buffer =
-      Opt.(default empty (map Gnttab.Local_mapping.to_buf readonly_mapping)) in
+      Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) readonly_mapping)) in
 
     let _ = (* perform everything else in a background thread *)
       (* Handle each request in order *)
@@ -141,22 +141,17 @@ let service_thread t =
                if is_writable request then 
                  writable_buffer else 
                  readonly_buffer in
-             let buffer = Bigarray.Array1.sub buffer 
+             let buffer = Cstruct.sub buffer 
                  (page_offset * page_size) 
                  (Array.length request.Req.segs * page_size) in
              (* TODO: we could coalesce the segments here *)
-             let (_, _, threads) = List.fold_left (fun (idx, off, threads) seg ->
-                 let page = Bigarray.Array1.sub buffer (idx * page_size) page_size in
+             let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
+                 let page = Cstruct.sub buffer (idx * page_size) page_size in
 
-                 let sector = Int64.(add request.Req.sector (of_int off)) in
-                 let fn = if is_writable request then t.ops.read else t.ops.write in
-                 let th = fn page sector seg.Req.first_sector seg.Req.last_sector in
-                 let newoff = off + (seg.Req.last_sector - seg.Req.first_sector + 1) in
-
-                 idx + 1, newoff, th :: threads
-               ) (0, 0, []) (Array.to_list request.Req.segs) in
-
-             lwt () = Lwt.join threads in
+                 let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
+                 idx + 1, frag :: bufs
+              ) (0, []) (Array.to_list request.Req.segs) in
+             lwt () = (if is_writable request then t.ops.read else t.ops.write) request.Req.sector (List.rev bufs) in
              let open Res in 
              let slot = Ring.Rpc.Back.(slot t.ring (next_res_id t.ring)) in
              (* These responses aren't visible until pushed (below) *)
