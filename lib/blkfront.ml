@@ -375,13 +375,39 @@ let rec multiple_requests_into op t start_sector = function
 let connect id =
   if Hashtbl.mem devices id
   then return (`Ok (Hashtbl.find devices id))
-  else
-    (* If [id] is an integer, use it. Otherwise default to the first
-       available disk. *)
+  else begin
     lwt all = enumerate () in
-    let id' = if List.mem id all then Some id
-      else (if all = [] then None else Some (List.hd all)) in
-    match id' with
+    (* Apply a set of heuristics to locate the disk:
+       if [id] is a xen virtual disk bus slot number (e.g. 51712) then use it
+       if [id] is a "linux device string" (e.g. "xvda" or "/dev/xvda") then translate it
+    *)
+    let choice =
+      if List.mem id all then begin
+        printf "Block.connect %s: interpreting %s as a xen virtual disk bus slot number\n" id id;
+        Some id
+      end else begin
+        let id' =
+          let prefix = "/dev/" in
+          let prefix' = String.length prefix and id' = String.length id in
+          let stripped =
+            if prefix' <= id' && (String.sub id 0 prefix' = prefix)
+            then String.sub id prefix' (id' - prefix') else id in
+          try
+            let device = Device_number.of_linux_device stripped in
+            string_of_int (Device_number.to_xenstore_key device)
+          with _ -> id in
+        if List.mem id' all then begin
+          printf "Block.connect %s: interpreting %s as a linux device string, translating to %s\n" id id id';
+          Some id'
+        end else match all with
+          | x :: _ ->
+            printf "Block.connect %s: unsure how to interpret '%s', defaulting to first disk %s\n" id id x;
+            Some x
+          | [] ->
+            printf "Block.connect %s: unable to match '%s' to any available devices [ %s ]\n" id id (String.concat "; " all);
+            None
+      end in
+    match choice with
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
       lwt trans = plug id' in
@@ -394,6 +420,7 @@ let connect id =
       return (`Error (`Unknown 
                         (Printf.sprintf "device %s not found (available = [ %s ])" 
                            id (String.concat ", " all)))) 
+  end
 
 let id t = string_of_int t.vdev
 
