@@ -71,6 +71,21 @@ end
 
 let empty = Cstruct.create 0
 
+module Request = struct
+  type kind = Read | Write
+
+  type request = {
+    kind: kind;
+    sector: int64;
+    buffers: Cstruct.t list;
+    slots: int list;
+  }
+
+  (* partition into parallel groups where everything within a group can
+     be executed in parallel since all the conflicts are between groups. *)
+
+end
+
 module Make(A: ACTIVATIONS) = struct
 let service_thread t =
   let rec loop_forever after =
@@ -134,30 +149,34 @@ let service_thread t =
       Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) readonly_mapping)) in
 
     let _ = (* perform everything else in a background thread *)
-      (* Handle each request in order *)
-      lwt () = Lwt_list.iter_s
-          (fun (request, page_offset) ->
-             let buffer = 
-               if is_writable request then 
-                 writable_buffer else 
-                 readonly_buffer in
-             let buffer = Cstruct.sub buffer 
-                 (page_offset * page_size) 
-                 (Array.length request.Req.segs * page_size) in
-             (* TODO: we could coalesce the segments here *)
-             let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
-                 let page = Cstruct.sub buffer (idx * page_size) page_size in
-
-                 let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
-                 idx + 1, frag :: bufs
-              ) (0, []) (Array.to_list request.Req.segs) in
-             lwt () = (if is_writable request then t.ops.read else t.ops.write) request.Req.sector (List.rev bufs) in
-             let open Res in 
-             let slot = Ring.Rpc.Back.(slot t.ring (next_res_id t.ring)) in
-             (* These responses aren't visible until pushed (below) *)
-             write_response (request.Req.id, {op=request.Req.op; st=Some OK}) slot;
-             return ()
-          ) requests in
+      let open Block_request in
+      let requests = List.fold_left (fun acc (request, page_offset) -> match request.Req.op with
+        | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
+        | Some op ->
+          let buffer = if is_writable request then writable_buffer else readonly_buffer in
+          let buffer = Cstruct.sub buffer (page_offset * page_size) (Array.length request.Req.segs * page_size) in
+          let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
+            let page = Cstruct.sub buffer (idx * page_size) page_size in
+            let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
+            idx + 1, frag :: bufs
+          ) (0, []) (Array.to_list request.Req.segs) in
+          add acc request.Req.id op request.Req.sector (List.rev bufs)
+        ) empty requests in
+      let rec work remaining = match pop remaining with
+      | [], _ -> return ()
+      | now, later ->
+        lwt () = Lwt_list.iter_p (fun r ->
+          lwt () = (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers in
+          let open Res in
+          List.iter (fun id ->
+            let slot = Ring.Rpc.Back.(slot t.ring (next_res_id t.ring)) in
+            (* These responses aren't visible until pushed (below) *)
+            write_response (id, {op=Some r.Block_request.op; st=Some OK}) slot;
+          ) r.id;
+          return ()
+        ) now in
+        work later in
+      lwt () = work requests in
 
       (* We must unmap before pushing because the frontend will attempt
          to reclaim the pages (without this you get "g.e. still in use!"

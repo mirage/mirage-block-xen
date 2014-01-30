@@ -27,5 +27,5 @@ Library mirage_block_xen_back
   Path:               lib
   Findlibparent:      mirage_block_xen
   Findlibname:        back
-  Modules:            Blkback
+  Modules:            Blkback, Block_request
   BuildDepends:       lwt, lwt.syntax, cstruct, cstruct.syntax, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt
