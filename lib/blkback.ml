@@ -52,7 +52,6 @@ type ('a, 'b) t = {
   ring:   ('a, 'b) Ring.Rpc.Back.t;
   ops :   ops;
   parse_req : Cstruct.t -> Req.t;
-  wait:   Eventchn.t -> unit Lwt.t;
 }
 
 let page_size = 4096
@@ -86,7 +85,18 @@ module Request = struct
 
 end
 
-module Make(A: ACTIVATIONS) = struct
+module BlockError = struct
+  open Lwt
+  let (>>=) x f = x >>= function
+  | `Ok x -> f x
+  | `Error (`Unknown x) -> fail (Failure x)
+  | `Error `Unimplemented -> fail (Failure "unimplemented in block device")
+  | `Error `Is_read_only -> fail (Failure "block device is read-only")
+  | `Error `Disconnected -> fail (Failure "block device is disconnected")
+  | `Error _ -> fail (Failure "unknown block device failure")
+end
+
+module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
 let service_thread t =
   let rec loop_forever after =
     (* For all the requests on the ring, build up a list of
@@ -195,7 +205,7 @@ let service_thread t =
     loop_forever next in
   loop_forever A.program_start
 
-let init xg xe domid ring_info wait ops =
+let init xg xe domid ring_info ops =
   let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
   let parse_req, idx_size = match ring_info.RingInfo.protocol with
     | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
@@ -212,8 +222,175 @@ let init xg xe domid ring_info wait ops =
     let buf = Gnttab.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ring in
-    let t = { domid; xg; xe; evtchn; ops; wait; parse_req; ring } in
+    let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
     let th = service_thread t in
     on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
     th
+
+open X
+
+let get_my_domid client =
+  immediate client (fun xs ->
+    try_lwt
+      lwt domid = read xs "domid" in
+      return (int_of_string domid)
+    with Xs_protocol.Enoent _ -> return 0)
+
+let mk_backend_path client name (domid,devid) =
+  lwt self = get_my_domid client in
+  return (Printf.sprintf "/local/domain/%d/backend/%s/%d/%d" self name domid devid)
+
+let mk_frontend_path client (domid,devid) =
+  return (Printf.sprintf "/local/domain/%d/device/vbd/%d" domid devid)
+
+let writev client pairs =
+  transaction client (fun xs ->
+    Lwt_list.iter_s (fun (k, v) -> write xs k v) pairs
+  )
+
+let readv client path keys =
+  lwt options = immediate client (fun xs ->
+    Lwt_list.map_s (fun k ->
+      try_lwt
+        lwt v = read xs (path ^ "/" ^ k) in
+        return (Some (k, v))
+      with _ -> return None) keys
+  ) in
+  return (List.fold_left (fun acc x -> match x with None -> acc | Some y -> y :: acc) [] options)
+
+let read_one client k = immediate client (fun xs ->
+  try_lwt
+    lwt v = read xs k in
+    return (`OK v)
+  with _ -> return (`Error ("failed to read: " ^ k)))
+
+let write_one client k v = immediate client (fun xs -> write xs k v)
+
+let exists client k = match_lwt read_one client k with `Error _ -> return false | _ -> return true
+
+(* Request a hot-unplug *)
+let request_close name (domid, devid) =
+  lwt client = make () in
+  lwt backend_path = mk_backend_path client name (domid,devid) in
+  writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.State.to_assoc_list Blkproto.State.Closing))
+
+let run (id: string) name (domid,devid) =
+  lwt client = make () in
+  let xg = Gnttab.interface_open () in
+  let xe = Eventchn.init () in
+
+  let open BlockError in
+  B.connect id >>= fun t ->
+
+  lwt backend_path = mk_backend_path client name (domid,devid) in
+
+  (* Tell xapi we've noticed the backend *)
+  lwt () = write_one client
+    (backend_path ^ "/" ^ Blkproto.Hotplug._hotplug_status)
+    Blkproto.Hotplug._online in
+
+  try_lwt 
+
+    lwt info = B.get_info t in
+   
+    (* Write the disk information for the frontend *)
+    let di = Blkproto.({ DiskInfo.sector_size = info.B.sector_size;
+                         sectors = info.B.size_sectors;
+                         media = Media.Disk;
+                         mode = Mode.ReadWrite }) in
+    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.DiskInfo.to_assoc_list di)) in
+    lwt frontend_path = match_lwt read_one client (backend_path ^ "/frontend") with
+      | `Error x -> failwith x
+      | `OK x -> return x in
+   
+    (* wait for the frontend to enter state Initialised *)
+    lwt () = wait client (fun xs ->
+      try_lwt
+        lwt state = read xs (frontend_path ^ "/" ^ Blkproto.State._state) in
+        if Blkproto.State.of_string state = Some Blkproto.State.Initialised
+        || Blkproto.State.of_string state = Some Blkproto.State.Connected
+        then return ()
+        else raise Xs_protocol.Eagain
+      with Xs_protocol.Enoent _ -> raise Xs_protocol.Eagain
+    ) in
+
+    lwt frontend = readv client frontend_path Blkproto.RingInfo.keys in
+    let ring_info = match Blkproto.RingInfo.of_assoc_list frontend with
+      | `OK x -> x
+      | `Error x -> failwith x in
+    printf "%s\n%!" (Blkproto.RingInfo.to_string ring_info);
+    let device_read ofs bufs =
+      try_lwt
+        B.read t ofs bufs >>= fun () ->
+        return ()
+      with e ->
+        printf "blkback: read exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+        Lwt.fail e in
+    let device_write ofs bufs =
+      try_lwt
+        B.write t ofs bufs >>= fun () ->
+        return ()
+      with e ->
+        printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+        Lwt.fail e in
+    let be_thread = init xg xe domid ring_info {
+      read = device_read;
+      write = device_write;
+    } in
+    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.State.to_assoc_list Blkproto.State.Connected)) in
+    (* wait for the frontend to disappear or enter a Closed state *)
+    lwt () = wait client (fun xs -> 
+      try_lwt
+        lwt state = read xs (frontend_path ^ "/state") in
+        if Blkproto.State.of_string state <> (Some Blkproto.State.Closed)
+        then raise Xs_protocol.Eagain
+        else return ()
+      with Xs_protocol.Enoent _ ->
+        return ()
+    ) in
+    Lwt.cancel be_thread;
+    Lwt.return ()
+  with e ->
+    printf "blkback caught %s\n%!" (Printexc.to_string e);
+    lwt () = B.disconnect t in
+    return ()
+
+let create ?backend_domid name (domid, device) =
+  lwt client = make () in
+  (* Construct the device: *)
+  lwt backend_path = mk_backend_path client name (domid, device) in
+  lwt frontend_path = mk_frontend_path client (domid, device) in
+  lwt backend_domid = match backend_domid with
+  | None -> get_my_domid client
+  | Some x -> return x in
+  let c = Blkproto.Connection.({
+    virtual_device = string_of_int device;
+    backend_path;
+    backend_domid;
+    frontend_path;
+    frontend_domid = domid;
+    mode = Blkproto.Mode.ReadWrite;
+    media = Blkproto.Media.Disk;
+    removable = false;
+  }) in
+  transaction client (fun xs ->
+    Lwt_list.iter_s (fun (owner_domid, (k, v)) ->
+      lwt () = write xs k v in
+      let acl =
+        let open Xs_protocol.ACL in
+        { owner = owner_domid; other = READ; acl = [ ] } in
+      lwt () = setperms xs k acl in
+      return ()
+    ) (Blkproto.Connection.to_assoc_list c)
+  )
+
+let destroy name (domid, device) =
+  lwt client = make () in
+  lwt backend_path = mk_backend_path client name (domid, device) in
+  lwt frontend_path = mk_frontend_path client (domid, device) in
+  immediate client (fun xs ->
+    lwt () = rm xs backend_path in
+    lwt () = rm xs frontend_path in
+    return ()
+  )
 end
