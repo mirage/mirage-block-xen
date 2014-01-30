@@ -1,9 +1,12 @@
-1.1.0 (trunk):
+1.1.0 (30-Jan-2014):
 * blkback: functorise over Activations.
 * Depend on `xen-grant` and `xen-event` libraries rather than `xenctrl`.
 * Remove `OS` module, depend on `io-page` (no `-unix` or `-xen`).
 * Only use the high-level Activations.after interface.
 * blkfront: allow 'connect' to take '51712' (bus slot) or 'xvda' or '/dev/xvda'
+* blkback: improve performance through request merging
+* blkback: functorise over Activations, xenstore and backing store
+* blkback: add the toolstack-level device create/destroy functions
 
 1.0.0 (10-Dec-2013):
 * Add ISC copyrights everywhere.
