@@ -172,6 +172,23 @@ let enumerate () =
     printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
     return []
 
+(** Return a list of pairs [backend-params-key, frontend-id].
+    This is only intended to be a heuristic for 'connect' below. *)
+let params_to_frontend_ids ids =
+  lwt xs = Xs.make () in
+  Lwt_list.fold_left_s (fun list id ->
+    try_lwt
+      lwt backend = Xs.(immediate xs (fun h -> read h (Printf.sprintf "device/vbd/%s/backend" id))) in
+      lwt params = Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend))) in
+      return ((params, id) :: list)
+    with Xs_protocol.Enoent path ->
+      printf "Blkif.params_to_frontend_ids: missing %s\n" path;
+      return list
+    | e ->
+      printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
+      return list
+  ) [] ids
+
 (** [single_request_into op t start_sector start_offset end_offset pages]
     issues a single request [op], starting at [start_sector] and using
     the memory [pages] as either the target of data (if [op] is Read) or the
@@ -375,13 +392,49 @@ let rec multiple_requests_into op t start_sector = function
 let connect id =
   if Hashtbl.mem devices id
   then return (`Ok (Hashtbl.find devices id))
-  else
-    (* If [id] is an integer, use it. Otherwise default to the first
-       available disk. *)
+  else begin
     lwt all = enumerate () in
-    let id' = if List.mem id all then Some id
-      else (if all = [] then None else Some (List.hd all)) in
-    match id' with
+    lwt list = params_to_frontend_ids all in
+    (* Apply a set of heuristics to locate the disk:
+       if [id] is a xen virtual disk bus slot number (e.g. 51712) then use it
+       if [id] is a "linux device string" (e.g. "xvda" or "/dev/xvda") then translate it
+       if [id] is a unique backend "params" xenstore key then use it
+    *)
+    let choice =
+      if List.mem id all then begin
+        printf "Block.connect %s: interpreting %s as a xen virtual disk bus slot number\n" id id;
+        Some id
+      end else begin
+        let id' =
+          let prefix = "/dev/" in
+          let prefix' = String.length prefix and id' = String.length id in
+          let stripped =
+            if prefix' <= id' && (String.sub id 0 prefix' = prefix)
+            then String.sub id prefix' (id' - prefix') else id in
+          try
+            let device = Device_number.of_linux_device stripped in
+            string_of_int (Device_number.to_xenstore_key device)
+          with _ -> id in
+        if List.mem id' all then begin
+          printf "Block.connect %s: interpreting %s as a linux device string, translating to %s\n" id id id';
+          Some id'
+        end else begin
+          match List.map snd (List.filter (fun (params, _) -> params = id) list), all with
+          | [ id' ], _ ->
+            printf "Block.connect %s: interpreting %s as a backend params key, translating to %s\n" id id id';
+            Some id'
+          | first :: rest, _ ->
+            printf "Block.connect %s: matches the backend params keys of [ %s ], making arbitrary choice %s\n" id (String.concat "; " (first::rest)) first;
+            Some first
+          | [], first :: rest ->
+            printf "Block.connect %s: unsure how to interpret '%s', defaulting to first disk %s\n" id id first;
+            Some first
+          | [], [] ->
+            printf "Block.connect %s: unable to match '%s' to any available devices [ %s ]\n" id id (String.concat "; " all);
+            None
+        end
+      end in
+    match choice with
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
       lwt trans = plug id' in
@@ -394,6 +447,7 @@ let connect id =
       return (`Error (`Unknown 
                         (Printf.sprintf "device %s not found (available = [ %s ])" 
                            id (String.concat ", " all)))) 
+  end
 
 let id t = string_of_int t.vdev
 
