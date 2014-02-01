@@ -307,6 +307,14 @@ module Req = struct
   } as little_endian
   let _ = assert (sizeof_segment = 8)
 
+  let get_segments payload nr_segs =
+    Array.init nr_segs (fun i ->
+      let seg = Cstruct.shift payload (i * sizeof_segment) in {
+        gref = get_segment_gref seg;
+        first_sector = get_segment_first_sector seg;
+        last_sector = get_segment_last_sector seg;
+      })
+
   (* The request header has a slightly different format caused by
      not using __attribute__(packed) and letting the C compiler pad *)
   module type DIRECT = sig
@@ -375,12 +383,7 @@ module Req = struct
         }
       end else begin
         let payload = Cstruct.shift slot D.sizeof_hdr in
-        let segs = Array.init (D.get_hdr_nr_segs slot) (fun i ->
-        let seg = Cstruct.shift payload (i * sizeof_segment) in {
-          gref = get_segment_gref seg;
-          first_sector = get_segment_first_sector seg;
-          last_sector = get_segment_last_sector seg;
-        }) in {
+        let segs = get_segments payload (D.get_hdr_nr_segs slot) in {
           op; handle = D.get_hdr_handle slot; id = D.get_hdr_id slot;
           sector = D.get_hdr_sector slot; nr_segs = D.get_hdr_nr_segs slot;
           segs = Direct segs
