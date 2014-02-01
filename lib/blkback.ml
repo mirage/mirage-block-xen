@@ -144,7 +144,9 @@ let service_thread t stats =
          incr counter;
          let open Req in
          let req = t.parse_req slot in
-         let segs = Array.to_list req.segs in
+         let segs = match req.segs with
+         | Indirect _ -> failwith "indirect descriptors unimplemented"
+         | Direct segs -> Array.to_list segs in
          if is_writable req then begin
            let grants = grants_of_segments segs in
            writable_grants := !writable_grants @ grants;
@@ -174,18 +176,21 @@ let service_thread t stats =
 
     let _ = (* perform everything else in a background thread *)
       let open Block_request in
-      let requests = List.fold_left (fun acc (request, page_offset) -> match request.Req.op with
+      let requests = List.fold_left (fun acc (request, page_offset) ->
+        let segs = match request.Req.segs with
+         | Req.Indirect _ -> failwith "indirect descriptors unimplemented"
+         | Req.Direct segs -> Array.to_list segs in
+        match request.Req.op with
         | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
         | Some op ->
           let buffer = if is_writable request then writable_buffer else readonly_buffer in
-          let nr_segs = Array.length request.Req.segs in
-          stats.segments_per_request.(nr_segs) <- stats.segments_per_request.(nr_segs) + 1;
-          let buffer = Cstruct.sub buffer (page_offset * page_size) (nr_segs * page_size) in
+          stats.segments_per_request.(request.Req.nr_segs) <- stats.segments_per_request.(request.Req.nr_segs) + 1;
+          let buffer = Cstruct.sub buffer (page_offset * page_size) (request.Req.nr_segs * page_size) in
           let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
             let page = Cstruct.sub buffer (idx * page_size) page_size in
             let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
             idx + 1, frag :: bufs
-          ) (0, []) (Array.to_list request.Req.segs) in
+          ) (0, []) segs in
           add acc request.Req.id op request.Req.sector (List.rev bufs)
         ) empty requests in
       let rec work remaining = match pop remaining with

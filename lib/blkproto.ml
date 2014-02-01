@@ -252,12 +252,14 @@ module Req = struct
     Write_barrier = 2;
     Flush         = 3;
     Op_reserved_1 = 4; (* SLES device-specific packet *)
-    Trim          = 5
+    Trim          = 5;
+    Indirect      = 6;
   } as uint8_t
 
   let string_of_op = function
   | Read -> "Read" | Write -> "Write" | Write_barrier -> "Write_barrier"
   | Flush -> "Flush" | Op_reserved_1 -> "Op_reserved_1" | Trim -> "Trim"
+  | Indirect -> "Indirect"
 
   exception Unknown_request_type of int
 
@@ -273,8 +275,13 @@ module Req = struct
   let string_of_seg seg =
     Printf.sprintf "{gref=%ld first=%d last=%d}" seg.gref seg.first_sector seg.last_sector
 
-  let string_of_segs segs = 
-    Printf.sprintf "[%s]" (String.concat "," (List.map string_of_seg (Array.to_list segs)))
+  type segs =
+  | Direct of seg array
+  | Indirect of int32 array
+
+  let string_of_segs = function
+  | Direct segs -> Printf.sprintf "direct [ %s ]" (String.concat "; " (List.map string_of_seg (Array.to_list segs)))
+  | Indirect refs -> Printf.sprintf "indirect [ %s ]" (String.concat "; " (List.map Int32.to_string (Array.to_list refs)))
 
   (* Defined in include/xen/io/blkif.h : blkif_request_t *)
   type t = {
@@ -282,13 +289,14 @@ module Req = struct
     handle: int;
     id: int64;
     sector: int64;
-    segs: seg array;
+    nr_segs: int;
+    segs: segs;
   }
 
   let string_of t =
-    Printf.sprintf "op=%s\nhandle=%d\nid=%Ld\nsector=%Ld\nsegs=%s\n"
+    Printf.sprintf "{ op=%s handle=%d id=%Ld sector=%Ld segs=%s (total %d) }"
     (match t.op with Some x -> string_of_op x | None -> "None")
-      t.handle t.id t.sector (string_of_segs t.segs)
+      t.handle t.id t.sector (string_of_segs t.segs) t.nr_segs
 
   (* The segment looks the same in both 32-bit and 64-bit versions *)
   cstruct segment {
@@ -322,22 +330,23 @@ module Req = struct
 
     (* Write a request to a slot in the shared ring. *)
     let write_request req (slot: Cstruct.t) =
-      set_hdr_op slot (match req.op with None -> -1 | Some x -> op_to_int x);
-      set_hdr_nr_segs slot (Array.length req.segs);
-      set_hdr_handle slot req.handle;
-      set_hdr_id slot req.id;
-      set_hdr_sector slot req.sector;
-      let payload = Cstruct.shift slot sizeof_hdr in
-      Array.iteri (fun i seg ->
+      match req.segs with
+      | Indirect _ -> failwith "write_request with indirect descriptors unimplemented"
+      | Direct segs ->
+        set_hdr_op slot (match req.op with None -> -1 | Some x -> op_to_int x);
+        set_hdr_nr_segs slot (Array.length segs);
+        set_hdr_handle slot req.handle;
+        set_hdr_id slot req.id;
+        set_hdr_sector slot req.sector;
+        let payload = Cstruct.shift slot sizeof_hdr in
+        Array.iteri (fun i seg ->
           let buf = Cstruct.shift payload (i * sizeof_segment) in
           set_segment_gref buf seg.gref;
           set_segment_first_sector buf seg.first_sector;
           set_segment_last_sector buf seg.last_sector
-      ) req.segs;
-      req.id
+        ) segs;
+        req.id
 
-    (* Read a request out of an Cstruct.t; to be used by the Ring.Back for serving
-       requests, so this is untested for now *)
     let read_request slot =
       let payload = Cstruct.shift slot sizeof_hdr in
       let segs = Array.init (get_hdr_nr_segs slot) (fun i ->
@@ -351,7 +360,8 @@ module Req = struct
           handle = get_hdr_handle slot;
           id = get_hdr_id slot;
           sector = get_hdr_sector slot;
-          segs = segs
+          nr_segs = get_hdr_nr_segs slot;
+          segs = Direct segs
       }
 
   end
@@ -375,6 +385,32 @@ module Req = struct
       uint64_t       sector
     } as little_endian
   end)
+  module Indirect_64 = struct
+    cstruct hdr {
+      uint8_t        op;
+      uint8_t        indirect_op;
+      uint16_t       nr_segments;
+      uint32_t       _padding1;
+      uint64_t       id;
+      uint64_t       sector;
+      uint16_t       handle;
+      uint16_t       _padding2;
+      (* up to 8 grant references *)
+    } as little_endian
+
+    let read_request slot =
+      let nr_segments = get_hdr_nr_segments slot in
+      let nr_indirect_pages = (nr_segments + 511) / 512 in
+      let payload = Cstruct.shift slot sizeof_hdr in
+      let refs = Array.init nr_indirect_pages (fun i -> Cstruct.LE.get_uint32 payload (i * 4)) in {
+          op = int_to_op (get_hdr_op slot);
+          handle = get_hdr_handle slot;
+          id = get_hdr_id slot;
+          sector = get_hdr_sector slot;
+          nr_segs = get_hdr_nr_segments slot;
+          segs = Indirect refs
+      }
+  end
 end
 
 module Res = struct

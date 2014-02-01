@@ -203,7 +203,8 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
         (fun rs ->
            Gntshr.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
              (fun () ->
-                let segs = Array.mapi
+                let rs = Array.of_list rs in
+                let segs = Req.Direct (Array.mapi
                     (fun i rf ->
                        let first_sector = match i with
                          | 0 -> start_offset
@@ -213,10 +214,11 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
                          | _ -> 7 in
                        let gref = Int32.of_int rf in
                        { Req.gref; first_sector; last_sector }
-                    ) (Array.of_list rs) in
-                let id = Int64.of_int (List.hd rs) in
+                    ) rs) in
+                let nr_segs = Array.length rs in
+                let id = Int64.of_int rs.(0) in
                 let sector = Int64.(add start_sector (of_int start_offset)) in
-                let req = Req.({ op=Some op; handle=t.vdev; id; sector; segs }) in
+                let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
                 lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
                     (fun () -> Eventchn.notify h t.t.evtchn)
                     (Req.Proto_64.write_request req) in
