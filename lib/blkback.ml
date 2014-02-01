@@ -327,11 +327,14 @@ let run (id: string) name (domid,devid) =
     lwt info = B.get_info t in
    
     (* Write the disk information for the frontend *)
-    let di = Blkproto.({ DiskInfo.sector_size = info.B.sector_size;
-                         sectors = info.B.size_sectors;
-                         media = Media.Disk;
-                         mode = Mode.ReadWrite }) in
-    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.DiskInfo.to_assoc_list di)) in
+    let di = Blkproto.DiskInfo.(to_assoc_list {
+      sector_size = info.B.sector_size;
+      sectors = info.B.size_sectors;
+      media = Media.Disk;
+      mode = Mode.ReadWrite }) in
+    (* Advertise indirect descriptors with the same default as Linux blkback *)
+    let features = Blkproto.FeatureIndirect.(to_assoc_list { max_indirect_segments = 256 }) in
+    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (di @ features)) in
     lwt frontend_path = match_lwt read_one client (backend_path ^ "/frontend") with
       | `Error x -> failwith x
       | `OK x -> return x in

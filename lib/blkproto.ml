@@ -146,7 +146,28 @@ module Protocol = struct
     | Native -> "native"
 end
 
-let max_segments_per_request = 11
+let max_segments_per_request = 256
+
+module FeatureIndirect = struct
+  type t = {
+    max_indirect_segments: int;
+  }
+
+  let _max_indirect_segments = "feature-max-indirect-segments"
+
+  let to_assoc_list t =
+    if t.max_indirect_segments = 0
+    then [] (* don't advertise the feature *)
+    else [ _max_indirect_segments, string_of_int t.max_indirect_segments ]
+
+  let of_assoc_list l =
+    if not(List.mem_assoc _max_indirect_segments l)
+    then `OK { max_indirect_segments = 0 }
+    else
+      let x = List.assoc _max_indirect_segments l in
+      int x >>= fun max_indirect_segments ->
+      `OK { max_indirect_segments }
+end
 
 module DiskInfo = struct
   type t = {
