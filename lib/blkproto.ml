@@ -377,7 +377,8 @@ module Req = struct
         let nr_grefs = (nr_segs + 511) / 512 in
         let payload = Cstruct.shift slot I.sizeof_hdr in
         let grefs = Array.init nr_grefs (fun i -> Cstruct.LE.get_uint32 payload (i * 4)) in {
-          op; handle = I.get_hdr_handle slot; id = I.get_hdr_id slot;
+          op = int_to_op (I.get_hdr_indirect_op slot); (* the "real" request type *)
+          handle = I.get_hdr_handle slot; id = I.get_hdr_id slot;
           sector = I.get_hdr_sector slot; nr_segs;
           segs = Indirect grefs
         }
