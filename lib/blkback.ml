@@ -46,6 +46,10 @@ type ops = {
 
 type stats = {
   ring_utilisation: int array; (* one entry per leval, last entry includes all larger levels *)
+  segments_per_request: int array; (* one entry per number of segments *)
+  mutable total_requests: int;
+  mutable total_ok: int;
+  mutable total_error: int;
 }
 
 type ('a, 'b) t = {
@@ -166,6 +170,7 @@ let service_thread t stats =
 
     let bucket = if !counter < Array.length stats.ring_utilisation then !counter else Array.length stats.ring_utilisation - 1 in
     stats.ring_utilisation.(bucket) <- stats.ring_utilisation.(bucket) + 1;
+    stats.total_requests <- stats.total_requests + (!counter);
 
     let _ = (* perform everything else in a background thread *)
       let open Block_request in
@@ -173,7 +178,9 @@ let service_thread t stats =
         | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
         | Some op ->
           let buffer = if is_writable request then writable_buffer else readonly_buffer in
-          let buffer = Cstruct.sub buffer (page_offset * page_size) (Array.length request.Req.segs * page_size) in
+          let nr_segs = Array.length request.Req.segs in
+          stats.segments_per_request.(nr_segs) <- stats.segments_per_request.(nr_segs) + 1;
+          let buffer = Cstruct.sub buffer (page_offset * page_size) (nr_segs * page_size) in
           let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
             let page = Cstruct.sub buffer (idx * page_size) page_size in
             let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
@@ -185,13 +192,21 @@ let service_thread t stats =
       | [], _ -> return ()
       | now, later ->
         lwt () = Lwt_list.iter_p (fun r ->
-          lwt () = (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers in
+          lwt result =
+            try_lwt
+              lwt () = (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers in
+              return Res.OK
+            with e ->
+              return Res.Error in
           let open Res in
-          List.iter (fun id ->
+          let ok, error = List.fold_left (fun (ok, error) id ->
             let slot = Ring.Rpc.Back.(slot t.ring (next_res_id t.ring)) in
             (* These responses aren't visible until pushed (below) *)
-            write_response (id, {op=Some r.Block_request.op; st=Some OK}) slot;
-          ) r.id;
+            write_response (id, {op=Some r.Block_request.op; st=Some result}) slot;
+            if result = OK then (ok + 1, error) else (ok, error + 1)
+          ) (0, 0) r.id in
+          stats.total_ok <- stats.total_ok + ok;
+          stats.total_error <- stats.total_error + error;
           return ()
         ) now in
         work later in
@@ -232,7 +247,9 @@ let init xg xe domid ring_info ops =
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ring in
     let ring_utilisation = Array.create (Ring.Rpc.Back.nr_ents ring) 0 in
-    let stats = { ring_utilisation } in
+    let segments_per_request = Array.create Blkproto.max_segments_per_request 0 in
+    let total_requests = 0 and total_ok = 0 and total_error = 0 in
+    let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
     let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
     let th = service_thread t stats in
     on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
