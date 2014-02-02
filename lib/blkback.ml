@@ -274,6 +274,11 @@ let request_close name (domid, devid) =
   lwt backend_path = mk_backend_path client name (domid,devid) in
   writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.State.to_assoc_list Blkproto.State.Closing))
 
+let force_close (domid, device) =
+  lwt client = make () in
+  lwt frontend_path = mk_frontend_path client (domid, device) in
+  write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed) 
+
 let run (id: string) name (domid,devid) =
   lwt client = make () in
   let xg = Gnttab.interface_open () in

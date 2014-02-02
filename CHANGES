@@ -1,3 +1,6 @@
+trunk (unreleased)
+* blkback: add 'force_close' to more forcibly tear down the device
+
 1.1.0 (30-Jan-2014):
 * blkback: functorise over Activations.
 * Depend on `xen-grant` and `xen-event` libraries rather than `xenctrl`.
