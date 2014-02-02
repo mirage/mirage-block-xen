@@ -107,7 +107,12 @@ end
 let is_writable req = match req.Req.op with
 | Some Req.Read -> true (* we need to write into the page *) 
 | Some Req.Write -> false (* we read from the guest and write to the backend *)
-| _ -> failwith "Unhandled request type"
+| None ->
+  printf "FATAL: unknown request type\n%!";
+  failwith "unknown request type"
+| Some op ->
+  printf "FATAL: unhandled request type %s\n%!" (Req.string_of_op op);
+  failwith "unhandled request type"
 
 module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
 let service_thread t stats =
@@ -137,7 +142,9 @@ let service_thread t stats =
       | [] -> None (* nothing to do *)
       | grants ->
         begin match Gnttab.mapv t.xg grants writable with
-          | None -> failwith "Failed to map grants" (* TODO: handle this error cleanly *)
+          | None ->
+            printf "FATAL: failed to map batch of %d grant references\n%!" (List.length grants);
+            failwith "Failed to map grants" (* TODO: handle this error cleanly *)
           | Some x ->
             let buf = Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x) in
             let _ = List.fold_left (fun i gref -> Hashtbl.add grant_table (Int32.of_int gref.Gnttab.ref) (Cstruct.sub buf (4096 * i) 4096); i + 1) 0 grants in
@@ -146,7 +153,8 @@ let service_thread t stats =
     let maybe_unmap mapping =
       try
         Opt.iter (Gnttab.unmap_exn t.xg) mapping 
-      with e -> printf "Failed to unmap: %s\n%!" (Printexc.to_string e) in
+      with e ->
+        printf "FATAL: failed to unmap grant references (frontend will be confused (%s)\n%!" (Printexc.to_string e) in
 
     (* Dequeue all requests on the ring. *)
     let q = ref [] in
@@ -162,7 +170,7 @@ let service_thread t stats =
          | Indirect grefs ->
            let grefs = List.map (fun g -> { Gnttab.domid = t.domid; ref = Int32.to_int g }) (Array.to_list grefs) in
            indirect_grants := grefs @ (!indirect_grants)
-         | _ -> ()
+         | Direct _ -> ()
       );
     (* -- at this point the ring slots may be overwritten *)
 
@@ -174,12 +182,16 @@ let service_thread t stats =
         let page = lookup_mapping gref in
         let segs = Blkproto.Req.get_segments page req.Req.nr_segs in
         { req with Req.segs = Req.Direct segs }
-      | Req.Indirect _ -> failwith "unimplemented: more than 1 indirect descriptor page"
+      | Req.Indirect _ ->
+        printf "FATAL: unimplemented: more than 1 indirect descriptor page\n%!";
+        failwith "unimplemented: more than 1 indirect descriptor page"
     ) !q in
 
     let writable_q, readonly_q = List.partition is_writable q in
     let grants_of_req req = match req.Req.segs with
-      | Req.Indirect _ -> assert false (* replaced above *)
+      | Req.Indirect _ ->
+        printf "FATAL: grants_of_req encountered Indirect\n%!";
+        assert false (* replaced above *)
       | Req.Direct segs -> grants_of_segments (Array.to_list segs) in
     let writable_grants = List.concat (List.map grants_of_req writable_q) in
     let readonly_grants = List.concat (List.map grants_of_req readonly_q) in
@@ -196,17 +208,28 @@ let service_thread t stats =
       let open Block_request in
       let requests = List.fold_left (fun acc request ->
         let segs = match request.Req.segs with
-         | Req.Indirect _ -> assert false (* replaced above *)
+         | Req.Indirect _ ->
+           printf "FATAL: some Indirect descriptors were not dereferenced\n%!";
+           assert false (* replaced above *)
          | Req.Direct segs -> Array.to_list segs in
         match request.Req.op with
-        | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
+        | None ->
+          printf "FATAL: Unknown blkif request type\n%!";
+          failwith "unknown blkif request type";
+        | Some ((Req.Read | Req.Write) as op) ->
+          (try
+             let bufs = List.map (fun seg ->
+              let page = lookup_mapping seg.Req.gref in
+              let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
+              frag) segs in
+            add acc request.Req.id op request.Req.sector bufs
+          with e ->
+            printf "FATAL: failed to analyse request (%s)\n%!" (Printexc.to_string e);
+            acc (* drop request on the floor, but frontend will be confused *)
+          )
         | Some op ->
-          stats.segments_per_request.(request.Req.nr_segs) <- stats.segments_per_request.(request.Req.nr_segs) + 1;
-          let bufs = List.map (fun seg ->
-            let page = lookup_mapping seg.Req.gref in
-            let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
-            frag) segs in
-          add acc request.Req.id op request.Req.sector bufs
+          printf "FATAL: Unhandled request type %s\n%!" (Req.string_of_op op);
+          failwith "unhandled request type";
         ) empty q in
       let rec work remaining = match pop remaining with
       | [], _ -> return ()
