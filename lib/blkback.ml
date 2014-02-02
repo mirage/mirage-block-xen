@@ -165,6 +165,7 @@ let service_thread t stats =
          incr counter;
          let open Req in
          let req = t.parse_req slot in
+         stats.segments_per_request.(req.Req.nr_segs) <- stats.segments_per_request.(req.Req.nr_segs) + 1;
          q := req :: !q;
          match req.segs with
          | Indirect grefs ->
