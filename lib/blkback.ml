@@ -394,8 +394,8 @@ let destroy name (domid, device) =
   lwt backend_path = mk_backend_path client name (domid, device) in
   lwt frontend_path = mk_frontend_path client (domid, device) in
   immediate client (fun xs ->
-    lwt () = rm xs backend_path in
-    lwt () = rm xs frontend_path in
+    lwt () = try_lwt rm xs backend_path with _ -> return () in
+    lwt () = try_lwt rm xs frontend_path with _ -> return () in
     return ()
   )
 end

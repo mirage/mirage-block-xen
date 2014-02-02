@@ -1,5 +1,6 @@
 trunk (unreleased)
 * blkback: add 'force_close' to more forcibly tear down the device
+* blkback: make 'destroy' idempotent
 
 1.1.0 (30-Jan-2014):
 * blkback: functorise over Activations.
