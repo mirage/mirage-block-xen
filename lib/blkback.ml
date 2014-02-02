@@ -293,7 +293,12 @@ let init xg xe domid ring_info ops =
     let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
     let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
     let th = service_thread t stats in
-    on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
+    on_cancel th (fun () ->
+      let counter = ref 0 in
+      Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
+      if !counter <> 0 then printf "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?\n%!" !(counter); 
+      let () = Gnttab.unmap_exn xg mapping in ()
+    );
     th, stats
 
 open X
