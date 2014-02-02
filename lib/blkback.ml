@@ -246,8 +246,8 @@ let init xg xe domid ring_info ops =
     let buf = Gnttab.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ring in
-    let ring_utilisation = Array.create (Ring.Rpc.Back.nr_ents ring) 0 in
-    let segments_per_request = Array.create Blkproto.max_segments_per_request 0 in
+    let ring_utilisation = Array.create (Ring.Rpc.Back.nr_ents ring + 1) 0 in
+    let segments_per_request = Array.create (Blkproto.max_segments_per_request + 1) 0 in
     let total_requests = 0 and total_ok = 0 and total_error = 0 in
     let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
     let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
