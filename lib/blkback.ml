@@ -44,6 +44,14 @@ type ops = {
   write : int64 -> Cstruct.t list -> unit Lwt.t;
 }
 
+type stats = {
+  ring_utilisation: int array; (* one entry per leval, last entry includes all larger levels *)
+  segments_per_request: int array; (* one entry per number of segments *)
+  mutable total_requests: int;
+  mutable total_ok: int;
+  mutable total_error: int;
+}
+
 type ('a, 'b) t = {
   domid:  int;
   xg:     Gnttab.interface;
@@ -97,7 +105,7 @@ module BlockError = struct
 end
 
 module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
-let service_thread t =
+let service_thread t stats =
   let rec loop_forever after =
     (* For all the requests on the ring, build up a list of
        writable and readonly grants. We will map and unmap these
@@ -130,8 +138,10 @@ let service_thread t =
         end in
 
     (* Prepare to map all grants on the ring: *)
+    let counter = ref 0 in
     Ring.Rpc.Back.ack_requests t.ring
       (fun slot ->
+         incr counter;
          let open Req in
          let req = t.parse_req slot in
          let segs = Array.to_list req.segs in
@@ -158,13 +168,19 @@ let service_thread t =
     let readonly_buffer =
       Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) readonly_mapping)) in
 
+    let bucket = if !counter < Array.length stats.ring_utilisation then !counter else Array.length stats.ring_utilisation - 1 in
+    stats.ring_utilisation.(bucket) <- stats.ring_utilisation.(bucket) + 1;
+    stats.total_requests <- stats.total_requests + (!counter);
+
     let _ = (* perform everything else in a background thread *)
       let open Block_request in
       let requests = List.fold_left (fun acc (request, page_offset) -> match request.Req.op with
         | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
         | Some op ->
           let buffer = if is_writable request then writable_buffer else readonly_buffer in
-          let buffer = Cstruct.sub buffer (page_offset * page_size) (Array.length request.Req.segs * page_size) in
+          let nr_segs = Array.length request.Req.segs in
+          stats.segments_per_request.(nr_segs) <- stats.segments_per_request.(nr_segs) + 1;
+          let buffer = Cstruct.sub buffer (page_offset * page_size) (nr_segs * page_size) in
           let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
             let page = Cstruct.sub buffer (idx * page_size) page_size in
             let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
@@ -176,13 +192,21 @@ let service_thread t =
       | [], _ -> return ()
       | now, later ->
         lwt () = Lwt_list.iter_p (fun r ->
-          lwt () = (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers in
+          lwt result =
+            try_lwt
+              lwt () = (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers in
+              return Res.OK
+            with e ->
+              return Res.Error in
           let open Res in
-          List.iter (fun id ->
+          let ok, error = List.fold_left (fun (ok, error) id ->
             let slot = Ring.Rpc.Back.(slot t.ring (next_res_id t.ring)) in
             (* These responses aren't visible until pushed (below) *)
-            write_response (id, {op=Some r.Block_request.op; st=Some OK}) slot;
-          ) r.id;
+            write_response (id, {op=Some r.Block_request.op; st=Some result}) slot;
+            if result = OK then (ok + 1, error) else (ok, error + 1)
+          ) (0, 0) r.id in
+          stats.total_ok <- stats.total_ok + ok;
+          stats.total_error <- stats.total_error + error;
           return ()
         ) now in
         work later in
@@ -222,10 +246,14 @@ let init xg xe domid ring_info ops =
     let buf = Gnttab.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ring in
+    let ring_utilisation = Array.create (Ring.Rpc.Back.nr_ents ring + 1) 0 in
+    let segments_per_request = Array.create (Blkproto.max_segments_per_request + 1) 0 in
+    let total_requests = 0 and total_ok = 0 and total_error = 0 in
+    let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
     let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
-    let th = service_thread t in
+    let th = service_thread t stats in
     on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
-    th
+    th, stats
 
 open X
 
@@ -338,7 +366,7 @@ let run (id: string) name (domid,devid) =
       with e ->
         printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
         Lwt.fail e in
-    let be_thread = init xg xe domid ring_info {
+    let be_thread, stats = init xg xe domid ring_info {
       read = device_read;
       write = device_write;
     } in
@@ -354,11 +382,11 @@ let run (id: string) name (domid,devid) =
         return ()
     ) in
     Lwt.cancel be_thread;
-    Lwt.return ()
+    Lwt.return stats
   with e ->
     printf "blkback caught %s\n%!" (Printexc.to_string e);
     lwt () = B.disconnect t in
-    return ()
+    fail e
 
 let create ?backend_domid name (domid, device) =
   lwt client = make () in

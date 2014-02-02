@@ -146,6 +146,8 @@ module Protocol = struct
     | Native -> "native"
 end
 
+let max_segments_per_request = 11
+
 module DiskInfo = struct
   type t = {
     sector_size: int;
