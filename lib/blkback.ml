@@ -353,7 +353,7 @@ let force_close (domid, device) =
   lwt frontend_path = mk_frontend_path client (domid, device) in
   write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed) 
 
-let run (id: string) name (domid,devid) =
+let run ?(max_indirect_segments=256) (id: string) name (domid,devid) =
   lwt client = make () in
   let xg = Gnttab.interface_open () in
   let xe = Eventchn.init () in
@@ -379,7 +379,7 @@ let run (id: string) name (domid,devid) =
       media = Media.Disk;
       mode = Mode.ReadWrite }) in
     (* Advertise indirect descriptors with the same default as Linux blkback *)
-    let features = Blkproto.FeatureIndirect.(to_assoc_list { max_indirect_segments = 256 }) in
+    let features = Blkproto.FeatureIndirect.(to_assoc_list { max_indirect_segments}) in
     lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (di @ features)) in
     lwt frontend_path = match_lwt read_one client (backend_path ^ "/frontend") with
       | `Error x -> failwith x
