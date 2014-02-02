@@ -146,7 +146,28 @@ module Protocol = struct
     | Native -> "native"
 end
 
-let max_segments_per_request = 11
+let max_segments_per_request = 256
+
+module FeatureIndirect = struct
+  type t = {
+    max_indirect_segments: int;
+  }
+
+  let _max_indirect_segments = "feature-max-indirect-segments"
+
+  let to_assoc_list t =
+    if t.max_indirect_segments = 0
+    then [] (* don't advertise the feature *)
+    else [ _max_indirect_segments, string_of_int t.max_indirect_segments ]
+
+  let of_assoc_list l =
+    if not(List.mem_assoc _max_indirect_segments l)
+    then `OK { max_indirect_segments = 0 }
+    else
+      let x = List.assoc _max_indirect_segments l in
+      int x >>= fun max_indirect_segments ->
+      `OK { max_indirect_segments }
+end
 
 module DiskInfo = struct
   type t = {
@@ -231,12 +252,14 @@ module Req = struct
     Write_barrier = 2;
     Flush         = 3;
     Op_reserved_1 = 4; (* SLES device-specific packet *)
-    Trim          = 5
+    Trim          = 5;
+    Indirect_op   = 6;
   } as uint8_t
 
   let string_of_op = function
   | Read -> "Read" | Write -> "Write" | Write_barrier -> "Write_barrier"
   | Flush -> "Flush" | Op_reserved_1 -> "Op_reserved_1" | Trim -> "Trim"
+  | Indirect_op -> "Indirect_op"
 
   exception Unknown_request_type of int
 
@@ -252,8 +275,13 @@ module Req = struct
   let string_of_seg seg =
     Printf.sprintf "{gref=%ld first=%d last=%d}" seg.gref seg.first_sector seg.last_sector
 
-  let string_of_segs segs = 
-    Printf.sprintf "[%s]" (String.concat "," (List.map string_of_seg (Array.to_list segs)))
+  type segs =
+  | Direct of seg array
+  | Indirect of int32 array
+
+  let string_of_segs = function
+  | Direct segs -> Printf.sprintf "direct [ %s ]" (String.concat "; " (List.map string_of_seg (Array.to_list segs)))
+  | Indirect refs -> Printf.sprintf "indirect [ %s ]" (String.concat "; " (List.map Int32.to_string (Array.to_list refs)))
 
   (* Defined in include/xen/io/blkif.h : blkif_request_t *)
   type t = {
@@ -261,13 +289,14 @@ module Req = struct
     handle: int;
     id: int64;
     sector: int64;
-    segs: seg array;
+    nr_segs: int;
+    segs: segs;
   }
 
   let string_of t =
-    Printf.sprintf "op=%s\nhandle=%d\nid=%Ld\nsector=%Ld\nsegs=%s\n"
+    Printf.sprintf "{ op=%s handle=%d id=%Ld sector=%Ld segs=%s (total %d) }"
     (match t.op with Some x -> string_of_op x | None -> "None")
-      t.handle t.id t.sector (string_of_segs t.segs)
+      t.handle t.id t.sector (string_of_segs t.segs) t.nr_segs
 
   (* The segment looks the same in both 32-bit and 64-bit versions *)
   cstruct segment {
@@ -278,9 +307,17 @@ module Req = struct
   } as little_endian
   let _ = assert (sizeof_segment = 8)
 
+  let get_segments payload nr_segs =
+    Array.init nr_segs (fun i ->
+      let seg = Cstruct.shift payload (i * sizeof_segment) in {
+        gref = get_segment_gref seg;
+        first_sector = get_segment_first_sector seg;
+        last_sector = get_segment_last_sector seg;
+      })
+
   (* The request header has a slightly different format caused by
      not using __attribute__(packed) and letting the C compiler pad *)
-  module type PROTO = sig
+  module type DIRECT = sig
     val sizeof_hdr: int
     val get_hdr_op: Cstruct.t -> int
     val set_hdr_op: Cstruct.t -> int -> unit
@@ -294,45 +331,65 @@ module Req = struct
     val set_hdr_sector: Cstruct.t -> int64 -> unit
   end
 
-  module Marshalling = functor(P: PROTO) -> struct
-    open P
+  (* The indirect requests have one extra field, and other fields
+     have been shuffled *)
+  module type INDIRECT = sig
+    include DIRECT
+    val get_hdr_indirect_op: Cstruct.t -> int
+    val set_hdr_indirect_op: Cstruct.t -> int -> unit
+  end
+
+  module Marshalling(D: DIRECT)(I: INDIRECT) = struct
     (* total size of a request structure, in bytes *)
-    let total_size = sizeof_hdr + (sizeof_segment * segments_per_request)
+    let total_size = D.sizeof_hdr + (sizeof_segment * segments_per_request)
 
     (* Write a request to a slot in the shared ring. *)
-    let write_request req (slot: Cstruct.t) =
-      set_hdr_op slot (match req.op with None -> -1 | Some x -> op_to_int x);
-      set_hdr_nr_segs slot (Array.length req.segs);
-      set_hdr_handle slot req.handle;
-      set_hdr_id slot req.id;
-      set_hdr_sector slot req.sector;
-      let payload = Cstruct.shift slot sizeof_hdr in
-      Array.iteri (fun i seg ->
+    let write_request req (slot: Cstruct.t) = match req.segs with
+      | Direct segs ->
+        D.set_hdr_op slot (match req.op with None -> -1 | Some x -> op_to_int x);
+        D.set_hdr_nr_segs slot req.nr_segs;
+        D.set_hdr_handle slot req.handle;
+        D.set_hdr_id slot req.id;
+        D.set_hdr_sector slot req.sector;
+        let payload = Cstruct.shift slot D.sizeof_hdr in
+        Array.iteri (fun i seg ->
           let buf = Cstruct.shift payload (i * sizeof_segment) in
           set_segment_gref buf seg.gref;
           set_segment_first_sector buf seg.first_sector;
           set_segment_last_sector buf seg.last_sector
-      ) req.segs;
-      req.id
+        ) segs;
+        req.id
+      | Indirect refs ->
+        I.set_hdr_op slot (op_to_int Indirect_op);
+        I.set_hdr_indirect_op slot (match req.op with None -> -1 | Some x -> op_to_int x);
+        I.set_hdr_nr_segs slot req.nr_segs;
+        I.set_hdr_handle slot req.handle;
+        I.set_hdr_id slot req.id;
+        I.set_hdr_sector slot req.sector;
+        let payload = Cstruct.shift slot I.sizeof_hdr in
+        Array.iteri (fun i gref -> Cstruct.LE.set_uint32 payload (i * 4) gref) refs;
+        req.id
 
-    (* Read a request out of an Cstruct.t; to be used by the Ring.Back for serving
-       requests, so this is untested for now *)
     let read_request slot =
-      let payload = Cstruct.shift slot sizeof_hdr in
-      let segs = Array.init (get_hdr_nr_segs slot) (fun i ->
-          let seg = Cstruct.shift payload (i * sizeof_segment) in {
-              gref = get_segment_gref seg;
-              first_sector = get_segment_first_sector seg;
-              last_sector = get_segment_last_sector seg;
-          }
-      ) in {
-          op = int_to_op (get_hdr_op slot);
-          handle = get_hdr_handle slot;
-          id = get_hdr_id slot;
-          sector = get_hdr_sector slot;
-          segs = segs
-      }
-
+      let op = int_to_op (D.get_hdr_op slot) in
+      if op = Some Indirect_op then begin
+        let nr_segs = I.get_hdr_nr_segs slot in
+        let nr_grefs = (nr_segs + 511) / 512 in
+        let payload = Cstruct.shift slot I.sizeof_hdr in
+        let grefs = Array.init nr_grefs (fun i -> Cstruct.LE.get_uint32 payload (i * 4)) in {
+          op = int_to_op (I.get_hdr_indirect_op slot); (* the "real" request type *)
+          handle = I.get_hdr_handle slot; id = I.get_hdr_id slot;
+          sector = I.get_hdr_sector slot; nr_segs;
+          segs = Indirect grefs
+        }
+      end else begin
+        let payload = Cstruct.shift slot D.sizeof_hdr in
+        let segs = get_segments payload (D.get_hdr_nr_segs slot) in {
+          op; handle = D.get_hdr_handle slot; id = D.get_hdr_id slot;
+          sector = D.get_hdr_sector slot; nr_segs = D.get_hdr_nr_segs slot;
+          segs = Direct segs
+        }
+      end
   end
   module Proto_64 = Marshalling(struct
     cstruct hdr {
@@ -343,7 +400,20 @@ module Req = struct
       uint64_t       id;
       uint64_t       sector
     } as little_endian
+  end) (struct
+    cstruct hdr {
+      uint8_t        op;
+      uint8_t        indirect_op;
+      uint16_t       nr_segs;
+      uint32_t       _padding1;
+      uint64_t       id;
+      uint64_t       sector;
+      uint16_t       handle;
+      uint16_t       _padding2;
+      (* up to 8 grant references *)
+    } as little_endian
   end)
+
   module Proto_32 = Marshalling(struct
     cstruct hdr {
       uint8_t        op;
@@ -352,6 +422,17 @@ module Req = struct
       (* uint32_t       _padding; -- not included *)
       uint64_t       id;
       uint64_t       sector
+    } as little_endian
+  end) (struct
+    cstruct hdr {
+      uint8_t        op;
+      uint8_t        indirect_op;
+      uint16_t       nr_segs;
+      uint64_t       id;
+      uint64_t       sector;
+      uint16_t       handle;
+      uint16_t       _padding1;
+      (* up to 8 grant references *)
     } as little_endian
   end)
 end

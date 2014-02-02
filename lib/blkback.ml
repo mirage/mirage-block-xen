@@ -104,69 +104,102 @@ module BlockError = struct
   | `Error _ -> fail (Failure "unknown block device failure")
 end
 
+let is_writable req = match req.Req.op with
+| Some Req.Read -> true (* we need to write into the page *) 
+| Some Req.Write -> false (* we read from the guest and write to the backend *)
+| None ->
+  printf "FATAL: unknown request type\n%!";
+  failwith "unknown request type"
+| Some op ->
+  printf "FATAL: unhandled request type %s\n%!" (Req.string_of_op op);
+  failwith "unhandled request type"
+
 module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
 let service_thread t stats =
+
+  let grants_of_segments = List.map (fun seg -> {
+    Gnttab.domid = t.domid;
+    ref = Int32.to_int seg.Req.gref;
+  }) in
+
   let rec loop_forever after =
     (* For all the requests on the ring, build up a list of
        writable and readonly grants. We will map and unmap these
-       as a batch. *)
-    let writable_grants = ref [] in
-    let readonly_grants = ref [] in
-    (* The grants for a request will end up in the middle of a
-       mapped block, so we need to know at which page offset it
-       starts. *)
-    let requests = ref [] in (* request record * offset within block of pages *)
-    let next_writable_idx = ref 0 in
-    let next_readonly_idx = ref 0 in
+       as a batch. We need two batches: the first will include
+       the indirect descriptors which must be mapped before we
+       can form the second batch. *)
 
-    let grants_of_segments = List.map (fun seg  -> {
-          Gnttab.domid = t.domid;
-          ref = Int32.to_int seg.Req.gref;
-        }) in
+    (* a convenience table of grantref -> page Cstruct.t *)
+    let grant_table = Hashtbl.create 16 in
 
-    let is_writable req = match req.Req.op with
-      | Some Req.Read -> true (* we need to write into the page *) 
-      | Some Req.Write -> false (* we read from the guest and write to the backend *)
-      | _ -> failwith "Unhandled request type" in
+    let lookup_mapping gref =
+      if not(Hashtbl.mem grant_table gref) then begin
+        printf "FATAL: failed to find mapped grant reference %ld\n%!" gref;
+        failwith "failed to find mapped grant reference"
+      end else Hashtbl.find grant_table gref in
 
     let maybe_mapv writable = function
       | [] -> None (* nothing to do *)
       | grants ->
         begin match Gnttab.mapv t.xg grants writable with
-          | None -> failwith "Failed to map grants" (* TODO: handle this error cleanly *)
-          | x -> x
+          | None ->
+            printf "FATAL: failed to map batch of %d grant references\n%!" (List.length grants);
+            failwith "Failed to map grants" (* TODO: handle this error cleanly *)
+          | Some x ->
+            let buf = Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x) in
+            let _ = List.fold_left (fun i gref -> Hashtbl.add grant_table (Int32.of_int gref.Gnttab.ref) (Cstruct.sub buf (4096 * i) 4096); i + 1) 0 grants in
+            Some x
         end in
+    let maybe_unmap mapping =
+      try
+        Opt.iter (Gnttab.unmap_exn t.xg) mapping 
+      with e ->
+        printf "FATAL: failed to unmap grant references (frontend will be confused (%s)\n%!" (Printexc.to_string e) in
 
-    (* Prepare to map all grants on the ring: *)
+    (* Dequeue all requests on the ring. *)
+    let q = ref [] in
     let counter = ref 0 in
+    let indirect_grants = ref [] in
     Ring.Rpc.Back.ack_requests t.ring
       (fun slot ->
          incr counter;
          let open Req in
          let req = t.parse_req slot in
-         let segs = Array.to_list req.segs in
-         if is_writable req then begin
-           let grants = grants_of_segments segs in
-           writable_grants := !writable_grants @ grants;
-           requests := (req, !next_writable_idx) :: !requests;
-           next_writable_idx := !next_writable_idx + (List.length grants)
-         end else begin
-           let grants = grants_of_segments segs in
-           readonly_grants := !readonly_grants @ grants;
-           requests := (req, !next_readonly_idx) :: !requests;
-           next_readonly_idx := !next_readonly_idx + (List.length grants)
-         end;
+         stats.segments_per_request.(req.Req.nr_segs) <- stats.segments_per_request.(req.Req.nr_segs) + 1;
+         q := req :: !q;
+         match req.segs with
+         | Indirect grefs ->
+           let grefs = List.map (fun g -> { Gnttab.domid = t.domid; ref = Int32.to_int g }) (Array.to_list grefs) in
+           indirect_grants := grefs @ (!indirect_grants)
+         | Direct _ -> ()
       );
     (* -- at this point the ring slots may be overwritten *)
-    let requests = List.rev !requests in
-    (* Make one big writable mapping *)
-    let writable_mapping = maybe_mapv true !writable_grants in
-    let readonly_mapping = maybe_mapv false !readonly_grants in
 
-    let writable_buffer = 
-      Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) writable_mapping)) in
-    let readonly_buffer =
-      Opt.(default empty (map (fun x -> Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x)) readonly_mapping)) in
+    (* replace indirect requests with direct requests *)
+    let indirect_grants_mapping = maybe_mapv false !indirect_grants in
+    let q = List.map (fun req -> match req.Req.segs with
+      | Req.Direct _ -> req
+      | Req.Indirect [| gref |] ->
+        let page = lookup_mapping gref in
+        let segs = Blkproto.Req.get_segments page req.Req.nr_segs in
+        { req with Req.segs = Req.Direct segs }
+      | Req.Indirect _ ->
+        printf "FATAL: unimplemented: more than 1 indirect descriptor page\n%!";
+        failwith "unimplemented: more than 1 indirect descriptor page"
+    ) !q in
+
+    let writable_q, readonly_q = List.partition is_writable q in
+    let grants_of_req req = match req.Req.segs with
+      | Req.Indirect _ ->
+        printf "FATAL: grants_of_req encountered Indirect\n%!";
+        assert false (* replaced above *)
+      | Req.Direct segs -> grants_of_segments (Array.to_list segs) in
+    let writable_grants = List.concat (List.map grants_of_req writable_q) in
+    let readonly_grants = List.concat (List.map grants_of_req readonly_q) in
+
+    (* Make two big data mappings *)
+    let writable_mapping = maybe_mapv true writable_grants in
+    let readonly_mapping = maybe_mapv false readonly_grants in
 
     let bucket = if !counter < Array.length stats.ring_utilisation then !counter else Array.length stats.ring_utilisation - 1 in
     stats.ring_utilisation.(bucket) <- stats.ring_utilisation.(bucket) + 1;
@@ -174,20 +207,31 @@ let service_thread t stats =
 
     let _ = (* perform everything else in a background thread *)
       let open Block_request in
-      let requests = List.fold_left (fun acc (request, page_offset) -> match request.Req.op with
-        | None -> printf "Unknown blkif request type\n%!"; failwith "unknown blkif request type";
+      let requests = List.fold_left (fun acc request ->
+        let segs = match request.Req.segs with
+         | Req.Indirect _ ->
+           printf "FATAL: some Indirect descriptors were not dereferenced\n%!";
+           assert false (* replaced above *)
+         | Req.Direct segs -> Array.to_list segs in
+        match request.Req.op with
+        | None ->
+          printf "FATAL: Unknown blkif request type\n%!";
+          failwith "unknown blkif request type";
+        | Some ((Req.Read | Req.Write) as op) ->
+          (try
+             let bufs = List.map (fun seg ->
+              let page = lookup_mapping seg.Req.gref in
+              let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
+              frag) segs in
+            add acc request.Req.id op request.Req.sector bufs
+          with e ->
+            printf "FATAL: failed to analyse request (%s)\n%!" (Printexc.to_string e);
+            acc (* drop request on the floor, but frontend will be confused *)
+          )
         | Some op ->
-          let buffer = if is_writable request then writable_buffer else readonly_buffer in
-          let nr_segs = Array.length request.Req.segs in
-          stats.segments_per_request.(nr_segs) <- stats.segments_per_request.(nr_segs) + 1;
-          let buffer = Cstruct.sub buffer (page_offset * page_size) (nr_segs * page_size) in
-          let (_, bufs) = List.fold_left (fun (idx, bufs) seg ->
-            let page = Cstruct.sub buffer (idx * page_size) page_size in
-            let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
-            idx + 1, frag :: bufs
-          ) (0, []) (Array.to_list request.Req.segs) in
-          add acc request.Req.id op request.Req.sector (List.rev bufs)
-        ) empty requests in
+          printf "FATAL: Unhandled request type %s\n%!" (Req.string_of_op op);
+          failwith "unhandled request type";
+        ) empty q in
       let rec work remaining = match pop remaining with
       | [], _ -> return ()
       | now, later ->
@@ -215,11 +259,9 @@ let service_thread t stats =
       (* We must unmap before pushing because the frontend will attempt
          to reclaim the pages (without this you get "g.e. still in use!"
          errors from Linux *)
-      let () = try
-          Opt.iter (Gnttab.unmap_exn t.xg) readonly_mapping 
-        with e -> printf "Failed to unmap: %s\n%!" (Printexc.to_string e) in
-      let () = try Opt.iter (Gnttab.unmap_exn t.xg) writable_mapping 
-        with e -> printf "Failed to unmap: %s\n%!" (Printexc.to_string e) in
+      maybe_unmap readonly_mapping;
+      maybe_unmap writable_mapping;
+      maybe_unmap indirect_grants_mapping;
       (* Make the responses visible to the frontend *)
       let notify = Ring.Rpc.Back.push_responses_and_check_notify t.ring in
       if notify then Eventchn.notify t.xe t.evtchn;
@@ -252,7 +294,12 @@ let init xg xe domid ring_info ops =
     let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
     let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
     let th = service_thread t stats in
-    on_cancel th (fun () -> let () = Gnttab.unmap_exn xg mapping in ());
+    on_cancel th (fun () ->
+      let counter = ref 0 in
+      Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
+      if !counter <> 0 then printf "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?\n%!" !(counter); 
+      let () = Gnttab.unmap_exn xg mapping in ()
+    );
     th, stats
 
 open X
@@ -307,7 +354,7 @@ let force_close (domid, device) =
   lwt frontend_path = mk_frontend_path client (domid, device) in
   write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed) 
 
-let run (id: string) name (domid,devid) =
+let run ?(max_indirect_segments=256) (id: string) name (domid,devid) =
   lwt client = make () in
   let xg = Gnttab.interface_open () in
   let xe = Eventchn.init () in
@@ -327,11 +374,14 @@ let run (id: string) name (domid,devid) =
     lwt info = B.get_info t in
    
     (* Write the disk information for the frontend *)
-    let di = Blkproto.({ DiskInfo.sector_size = info.B.sector_size;
-                         sectors = info.B.size_sectors;
-                         media = Media.Disk;
-                         mode = Mode.ReadWrite }) in
-    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.DiskInfo.to_assoc_list di)) in
+    let di = Blkproto.DiskInfo.(to_assoc_list {
+      sector_size = info.B.sector_size;
+      sectors = info.B.size_sectors;
+      media = Media.Disk;
+      mode = Mode.ReadWrite }) in
+    (* Advertise indirect descriptors with the same default as Linux blkback *)
+    let features = Blkproto.FeatureIndirect.(to_assoc_list { max_indirect_segments}) in
+    lwt () = writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (di @ features)) in
     lwt frontend_path = match_lwt read_one client (backend_path ^ "/frontend") with
       | `Error x -> failwith x
       | `OK x -> return x in
