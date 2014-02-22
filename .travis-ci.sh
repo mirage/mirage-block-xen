@@ -1,4 +1,4 @@
-OPAM_DEPENDS="lwt cstruct shared-memory-ring xenctrl mirage ounit"
+OPAM_DEPENDS="lwt cstruct shared-memory-ring mirage ounit io-page mirage-types mirage-xen xen-evtchn xen-gnt xenstore"
 
 case "$OCAML_VERSION,$OPAM_VERSION" in
 3.12.1,1.0.0) ppa=avsm/ocaml312+opam10 ;;
