@@ -426,12 +426,9 @@ let connect id =
             printf "Block.connect %s: interpreting %s as a backend params key, translating to %s\n" id id id';
             Some id'
           | first :: rest, _ ->
-            printf "Block.connect %s: matches the backend params keys of [ %s ], making arbitrary choice %s\n" id (String.concat "; " (first::rest)) first;
-            Some first
-          | [], first :: rest ->
-            printf "Block.connect %s: unsure how to interpret '%s', defaulting to first disk %s\n" id id first;
-            Some first
-          | [], [] ->
+            printf "Block.connect %s: name is ambiguous: it matches multiple backend params keys [ %s ]" id (String.concat "; " (first::rest));
+            None
+          | _, _ ->
             printf "Block.connect %s: unable to match '%s' to any available devices [ %s ]\n" id id (String.concat "; " all);
             None
         end
