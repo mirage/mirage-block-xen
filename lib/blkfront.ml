@@ -434,6 +434,8 @@ let connect id =
         end
       end in
     match choice with
+    | Some id' when Hashtbl.mem devices id' ->
+      return (`Ok (Hashtbl.find devices id'))
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
       lwt trans = plug id' in
