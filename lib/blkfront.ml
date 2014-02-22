@@ -49,10 +49,8 @@ type t = {
 type id = string
 exception IO_error of string
 
-(** Set of active block devices *)
-let devices : (id, t) Hashtbl.t = Hashtbl.create 1
-
-let devices_waiters : (id, t Lwt.u Lwt_sequence.t) Hashtbl.t = Hashtbl.create 1
+(** slot number (e.g. "51712") to device threads *)
+let devices : (id, t Lwt.t) Hashtbl.t = Hashtbl.create 16
 
 let h = Eventchn.init ()
 
@@ -82,7 +80,8 @@ let poll t =
     loop next in
   loop Activations.program_start
 
-(* Given a VBD ID and a backend domid, construct a blkfront record *)
+(* Given a VBD ID and a backend domid, construct a blkfront record.
+   Note the logic in Block.connect below to only call this once per device *)
 let plug (id:id) =
   lwt vdev = try return (int_of_string id)
     with _ -> fail (Failure "invalid vdev") in
@@ -340,7 +339,10 @@ let resume t =
 
 let resume () =
   let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
-  Lwt_list.iter_p (fun (k,v) -> resume v) devs
+  Lwt_list.iter_p (fun (k,v) ->
+    lwt v = v in
+    resume v
+  ) devs
 
 let disconnect _id =
   printf "Blkfront: disconnect not implement yet\n";
@@ -392,9 +394,10 @@ let rec multiple_requests_into op t start_sector = function
     multiple_requests_into op t start_sector remaining
 
 let connect id =
-  if Hashtbl.mem devices id
-  then return (`Ok (Hashtbl.find devices id))
-  else begin
+  if Hashtbl.mem devices id then begin
+    lwt d = Hashtbl.find devices id in
+    return (`Ok d)
+  end else begin
     lwt all = enumerate () in
     lwt list = params_to_frontend_ids all in
     (* Apply a set of heuristics to locate the disk:
@@ -435,13 +438,20 @@ let connect id =
       end in
     match choice with
     | Some id' when Hashtbl.mem devices id' ->
-      return (`Ok (Hashtbl.find devices id'))
+      let t = Hashtbl.find devices id' in
+      Hashtbl.replace devices id t;
+      lwt d = t in
+      return (`Ok d)
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
+      let t, u = Lwt.task () in
+      Hashtbl.replace devices id' t;
+      Hashtbl.replace devices id t;
+      (* id' is now in devices, so no-one will call plug in parallel with us *)
       lwt trans = plug id' in
       let dev = { vdev = int_of_string id';
                   t = trans } in
-      Hashtbl.add devices id' dev;
+      Lwt.wakeup u dev;
       return (`Ok dev)
     | None ->
       printf "Block.connect %s: could not find device\n" id;
