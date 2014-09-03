@@ -6,6 +6,7 @@ trunk (unreleased)
 * blkback: support indirect descriptors (i.e. large block sizes)
 * blkfront: if the 'connect' string is at all ambiguous, fail rather
   than risk using the wrong disk
+* blkfront: use indirect segments if available
 
 1.1.0 (30-Jan-2014):
 * blkback: functorise over Activations.
