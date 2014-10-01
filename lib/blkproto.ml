@@ -343,6 +343,17 @@ module Req = struct
     (* total size of a request structure, in bytes *)
     let total_size = D.sizeof_hdr + (sizeof_segment * segments_per_request)
 
+    let page_size = Io_page.round_to_page_size 1
+    let segments_per_indirect_page = page_size / sizeof_segment
+
+    let write_segments segs buffer =
+      Array.iteri (fun i seg ->
+        let buf = Cstruct.shift buffer (i * sizeof_segment) in
+        set_segment_gref buf seg.gref;
+        set_segment_first_sector buf seg.first_sector;
+        set_segment_last_sector buf seg.last_sector
+      ) segs
+
     (* Write a request to a slot in the shared ring. *)
     let write_request req (slot: Cstruct.t) = match req.segs with
       | Direct segs ->
@@ -352,12 +363,7 @@ module Req = struct
         D.set_hdr_id slot req.id;
         D.set_hdr_sector slot req.sector;
         let payload = Cstruct.shift slot D.sizeof_hdr in
-        Array.iteri (fun i seg ->
-          let buf = Cstruct.shift payload (i * sizeof_segment) in
-          set_segment_gref buf seg.gref;
-          set_segment_first_sector buf seg.first_sector;
-          set_segment_last_sector buf seg.last_sector
-        ) segs;
+        write_segments segs payload;
         req.id
       | Indirect refs ->
         I.set_hdr_op slot (op_to_int Indirect_op);

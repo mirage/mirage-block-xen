@@ -38,6 +38,7 @@ type transport = {
   client: (Res.t,int64) Lwt_ring.Front.t;
   gnts: Gnt.gntref list;
   evtchn: Eventchn.t;
+  max_indirect_segments: int;
   info: info;
 }
 
@@ -138,6 +139,9 @@ let plug (id:id) =
       if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
     )) in
   (* Read backend info *)
+  lwt max_indirect_segments = backend_read int_of_string 0 FeatureIndirect._max_indirect_segments in
+  (* Limit to one page for now *)
+  let max_indirect_segments = min max_indirect_segments Req.Proto_64.segments_per_indirect_page in
   lwt info =
     lwt state = backend_read (Device_state.of_string) Device_state.Unknown "state" in
     printf "state=%s\n%!" (Device_state.prettyprint state);
@@ -146,10 +150,10 @@ let plug (id:id) =
     lwt read_write = backend_read (fun x -> x = "w") false "mode" in
     return { sector_size; size_sectors; read_write }
   in
-  printf "Blkfront info: sector_size=%u sectors=%Lu\n%!" 
-    info.sector_size info.size_sectors;
+  printf "Blkfront info: sector_size=%u sectors=%Lu max_indirect_segments=%d\n%!"
+    info.sector_size info.size_sectors max_indirect_segments;
   Eventchn.unmask h evtchn;
-  let t = { backend_id; backend; ring; client; gnts; evtchn; info } in
+  let t = { backend_id; backend; ring; client; gnts; evtchn; max_indirect_segments; info } in
   (* Start the background poll thread *)
   let _ = poll t in
   return t
@@ -188,6 +192,34 @@ let params_to_frontend_ids ids =
       return list
   ) [] ids
 
+(** Create a Direct request if we have 11 or fewer requests, else an Indirect request. *)
+let with_segs t ~start_offset ~end_offset rs fn =
+  let len = Array.length rs in
+  let segs = Array.mapi (fun i rf ->
+      let first_sector = match i with
+        | 0 -> start_offset
+        | _ -> 0 in
+      let last_sector = match i with
+        | n when n == len-1 -> end_offset
+        | _ -> 7 in
+      let gref = Int32.of_int rf in
+      { Req.gref; first_sector; last_sector }
+    ) rs in
+  if len <= 11 then (
+    fn (Req.Direct segs)
+  ) else (
+    (* The protocol allows up to 8 pages, but at 512 entries each it's unlikely
+     * we'll want more than one. The Linux blkback limits us to 256 by default
+     * anyway. *)
+    let indirect_page = Io_page.get 1 in
+    Req.Proto_64.write_segments segs (Io_page.to_cstruct indirect_page);
+    Gntshr.with_ref (fun indirect_ref ->
+      Gntshr.with_grant ~domid:t.t.backend_id ~writable:false indirect_ref indirect_page (fun () ->
+        fn (Req.Indirect [| Int32.of_int indirect_ref |])
+      )
+    )
+  )
+
 (** [single_request_into op t start_sector start_offset end_offset pages]
     issues a single request [op], starting at [start_sector] and using
     the memory [pages] as either the target of data (if [op] is Read) or the
@@ -203,30 +235,21 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
            Gntshr.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
              (fun () ->
                 let rs = Array.of_list rs in
-                let segs = Req.Direct (Array.mapi
-                    (fun i rf ->
-                       let first_sector = match i with
-                         | 0 -> start_offset
-                         | _ -> 0 in
-                       let last_sector = match i with
-                         | n when n == len-1 -> end_offset
-                         | _ -> 7 in
-                       let gref = Int32.of_int rf in
-                       { Req.gref; first_sector; last_sector }
-                    ) rs) in
                 let nr_segs = Array.length rs in
-                let id = Int64.of_int rs.(0) in
-                let sector = Int64.(add start_sector (of_int start_offset)) in
-                let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
-                lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
-                    (fun () -> Eventchn.notify h t.t.evtchn)
-                    (Req.Proto_64.write_request req) in
-                let open Res in
-                match res.st with
-                | Some Error -> fail (IO_error "read")
-                | Some Not_supported -> fail (IO_error "unsupported")
-                | None -> fail (IO_error "unknown error")
-                | Some OK -> return ()
+                with_segs t ~start_offset ~end_offset rs (fun segs ->
+                  let id = Int64.of_int rs.(0) in
+                  let sector = Int64.(add start_sector (of_int start_offset)) in
+                  let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
+                  lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
+                      (fun () -> Eventchn.notify h t.t.evtchn)
+                      (Req.Proto_64.write_request req) in
+                  let open Res in
+                  match res.st with
+                  | Some Error -> fail (IO_error "read")
+                  | Some Not_supported -> fail (IO_error "unsupported")
+                  | None -> fail (IO_error "unknown error")
+                  | Some OK -> return ()
+                )
              )
         )
     with
@@ -388,9 +411,10 @@ let get_info t =
 let rec multiple_requests_into op t start_sector = function
   | [] -> return ()
   | remaining ->
-    let pages, remaining = take remaining 11 in (* 11 segments per request *)
+    let max_segments_per_request = max 11 t.t.max_indirect_segments in
+    let pages, remaining = take remaining max_segments_per_request in
     lwt () = single_request_into op t start_sector pages in
-    let start_sector = Int64.(add start_sector (of_int (11 * 4096 / t.t.info.sector_size))) in
+    let start_sector = Int64.(add start_sector (of_int (max_segments_per_request * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
 let connect id =
