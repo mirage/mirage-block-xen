@@ -1,4 +1,4 @@
-trunk (unreleased)
+1.2.0 (3-Oct-2014)
 * blkback: add 'force_close' to more forcibly tear down the device
 * blkback: make 'destroy' idempotent
 * blkback: measure ring utilisation; segments per request; total
