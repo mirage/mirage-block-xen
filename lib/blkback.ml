@@ -146,7 +146,7 @@ let service_thread t stats =
             printf "FATAL: failed to map batch of %d grant references\n%!" (List.length grants);
             failwith "Failed to map grants" (* TODO: handle this error cleanly *)
           | Some x ->
-            let buf = Cstruct.of_bigarray (Gnttab.Local_mapping.to_buf x) in
+            let buf = Io_page.to_cstruct (Gnttab.Local_mapping.to_buf x) in
             let _ = List.fold_left (fun i gref -> Hashtbl.add grant_table (Int32.of_int gref.Gnttab.ref) (Cstruct.sub buf (4096 * i) 4096); i + 1) 0 grants in
             Some x
         end in
