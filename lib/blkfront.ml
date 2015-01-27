@@ -486,12 +486,10 @@ let connect id =
 
 let id t = string_of_int t.vdev
 
-exception Buffer_is_not_page_aligned
-exception Buffer_is_more_than_one_page
+exception Buffer_not_exactly_one_page
 let to_iopage x =
-  if x.Cstruct.off <> 0 then raise Buffer_is_not_page_aligned;
-  if x.Cstruct.len > 4096 then raise Buffer_is_more_than_one_page;
-  x.Cstruct.buffer
+  if x.Cstruct.len <> 4096 then raise Buffer_not_exactly_one_page;
+  Io_page.of_cstruct_exn x
 
 let to_iopages x =
   try return (List.map to_iopage x)
