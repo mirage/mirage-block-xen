@@ -1,7 +1,7 @@
-trunk (unreleased)
-* update to io-page.1.3.0
-* add an opam file for more convenient development
-* simplify travis configuration
+1.3.0 (29-Jan-2015)
+* Update to `io-page.1.4.0` interface.
+* Add an `opam` 1.2 file for more convenient development.
+* Simplify travis configuration via centralised scripts.
 
 1.2.0 (3-Oct-2014)
 * blkback: add 'force_close' to more forcibly tear down the device
