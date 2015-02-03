@@ -354,13 +354,12 @@ let force_close (domid, device) =
   lwt frontend_path = mk_frontend_path client (domid, device) in
   write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed) 
 
-let run ?(max_indirect_segments=256) (id: string) name (domid,devid) =
+let run ?(max_indirect_segments=256) t name (domid,devid) =
   lwt client = make () in
   let xg = Gnttab.interface_open () in
   let xe = Eventchn.init () in
 
   let open BlockError in
-  B.connect id >>= fun t ->
 
   lwt backend_path = mk_backend_path client name (domid,devid) in
 
