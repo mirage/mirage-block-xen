@@ -246,15 +246,17 @@ end
 module Req = struct
 
   (* Defined in include/xen/io/blkif.h, BLKIF_REQ_* *)
-  cenum op {
-    Read          = 0;
-    Write         = 1;
-    Write_barrier = 2;
-    Flush         = 3;
-    Op_reserved_1 = 4; (* SLES device-specific packet *)
-    Trim          = 5;
-    Indirect_op   = 6;
-  } as uint8_t
+  [%%cenum
+  type op =
+    | Read          [@id 0]
+    | Write         [@id 1]
+    | Write_barrier [@id 2]
+    | Flush         [@id 3]
+    | Op_reserved_1 [@id 4] (* SLES device-specific packet *)
+    | Trim          [@id 5]
+    | Indirect_op   [@id 6]
+    [@@int8_t]
+  ]
 
   let string_of_op = function
   | Read -> "Read" | Write -> "Write" | Write_barrier -> "Write_barrier"
