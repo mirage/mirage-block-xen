@@ -62,6 +62,7 @@ let alloc ~order (num,domid) =
   let buf = Io_page.get_order order in
 
   let pages = Io_page.to_pages buf in
+  let open Lwt.Infix in
   Gntshr.get_n (List.length pages)
   >>= fun gnts ->
   List.iter (fun (gnt, page) ->
@@ -77,6 +78,7 @@ let alloc ~order (num,domid) =
 (* Thread to poll for responses and activate wakeners *)
 let poll t =
   let rec loop from =
+    let open Lwt.Infix in
     Activations.after t.evtchn from
     >>= fun next ->
     let () = Lwt_ring.Front.poll t.client (Res.read_response) in
@@ -86,6 +88,7 @@ let poll t =
 (* Given a VBD ID and a backend domid, construct a blkfront record.
    Note the logic in Block.connect below to only call this once per device *)
 let plug (id:id) =
+  let open Lwt.Infix in
   ( try return (int_of_string id)
     with _ -> fail (Failure "invalid vdev") )
   >>= fun vdev ->
@@ -185,6 +188,7 @@ let unplug id =
 
 (** Return a list of valid VBDs *)
 let enumerate () =
+  let open Lwt.Infix in
   Xs.make ()
   >>= fun xs ->
   Lwt.catch
@@ -201,6 +205,7 @@ let enumerate () =
 (** Return a list of pairs [backend-params-key, frontend-id].
     This is only intended to be a heuristic for 'connect' below. *)
 let params_to_frontend_ids ids =
+  let open Lwt.Infix in
   Xs.make ()
   >>= fun xs ->
   Lwt_list.fold_left_s (fun list id ->
@@ -270,6 +275,7 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
                   let id = Int64.of_int rs.(0) in
                   let sector = Int64.(add start_sector (of_int start_offset)) in
                   let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
+                  let open Lwt.Infix in
                   Lwt_ring.Front.push_request_and_wait t.t.client
                       (fun () -> Eventchn.notify h t.t.evtchn)
                       (Req.Proto_64.write_request req)
@@ -363,6 +369,7 @@ let read_512 t sector num_sectors =
     let open Single_request in
     let len = npages_of r in
     let pages = Io_page.(to_pages (get len)) in
+    let open Lwt.Infix in
     single_request_into Req.Read t r.start_sector
         ~start_offset:r.start_offset ~end_offset:r.end_offset pages
     >>= fun () ->
@@ -386,6 +393,7 @@ let read_512 t sector num_sectors =
 
 let resume t =
   let vdev = sprintf "%d" t.vdev in
+  let open Lwt.Infix in
   plug vdev
   >>= fun transport ->
   let old_t = t.t in
@@ -395,6 +403,7 @@ let resume t =
 
 let resume () =
   let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
+  let open Lwt.Infix in
   Lwt_list.iter_p (fun (k,v) ->
     v >>= fun v ->
     resume v
@@ -446,14 +455,17 @@ let rec multiple_requests_into op t start_sector = function
   | remaining ->
     let max_segments_per_request = max 11 t.t.max_indirect_segments in
     let pages, remaining = take remaining max_segments_per_request in
+    let open Lwt.Infix in
     single_request_into op t start_sector pages
     >>= fun () ->
     let start_sector = Int64.(add start_sector (of_int (max_segments_per_request * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
 let connect id =
+  let open Lwt.Infix in
   if Hashtbl.mem devices id then begin
-    let d = Hashtbl.find devices id in
+    Hashtbl.find devices id
+    >>= fun d ->
     return (`Ok d)
   end else begin
     enumerate ()
@@ -532,11 +544,8 @@ let to_iopages x =
   try return (List.map to_iopage x)
   with e -> fail e
 
-let ( >>= ) x f = match x with
-  | `Error _ -> x
-  | `Ok x -> f x
-
 let read t start_sector pages =
+  let open Lwt.Infix in
   to_iopages pages
   >>= fun pages ->
   Lwt.catch
@@ -547,6 +556,7 @@ let read t start_sector pages =
     ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let write t start_sector pages =
+  let open Lwt.Infix in
   to_iopages pages
   >>= fun pages ->
   Lwt.catch

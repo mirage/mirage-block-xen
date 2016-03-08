@@ -232,6 +232,7 @@ let service_thread t stats =
           printf "FATAL: Unhandled request type %s\n%!" (Req.string_of_op op);
           failwith "unhandled request type";
         ) empty q in
+      let open Lwt.Infix in
       let rec work remaining = match pop remaining with
       | [], _ -> return ()
       | now, later ->
@@ -270,7 +271,7 @@ let service_thread t stats =
       let notify = Ring.Rpc.Back.push_responses_and_check_notify t.ring in
       if notify then Eventchn.notify t.xe t.evtchn;
       return () in
-
+    let open Lwt.Infix in
     A.after t.evtchn after
     >>= fun next ->
     loop_forever next in
@@ -310,6 +311,7 @@ let init xg xe domid ring_info ops =
 open X
 
 let get_my_domid client =
+  let open Lwt.Infix in
   immediate client (fun xs ->
     Lwt.catch
       (fun () ->
@@ -319,8 +321,10 @@ let get_my_domid client =
       ) (function
         | Xs_protocol.Enoent _ -> return 0
         | e -> fail e)
+  )
 
 let mk_backend_path client name (domid,devid) =
+  let open Lwt.Infix in
   get_my_domid client
   >>= fun self ->
   return (Printf.sprintf "/local/domain/%d/backend/%s/%d/%d" self name domid devid)
@@ -334,6 +338,7 @@ let writev client pairs =
   )
 
 let readv client path keys =
+  let open Lwt.Infix in
   immediate client (fun xs ->
     Lwt_list.map_s (fun k ->
       Lwt.catch
@@ -341,22 +346,27 @@ let readv client path keys =
           read xs (path ^ "/" ^ k)
           >>= fun v ->
           return (Some (k, v))
-        ) (fun _ -> return None) keys
+        ) (fun _ -> return None)
+    ) keys
   )
   >>= fun options ->
   return (List.fold_left (fun acc x -> match x with None -> acc | Some y -> y :: acc) [] options)
 
-let read_one client k = immediate client (fun xs ->
+let read_one client k =
+  let open Lwt.Infix in
+  immediate client (fun xs ->
   Lwt.catch
     (fun () ->
       read xs k
       >>= fun v ->
       return (`OK v)
     ) (fun _ -> return (`Error ("failed to read: " ^ k)))
+  )
 
 let write_one client k v = immediate client (fun xs -> write xs k v)
 
 let exists client k =
+  let open Lwt.Infix in
  read_one client k
  >>= function
  | `Error _ -> return false
@@ -364,6 +374,7 @@ let exists client k =
 
 (* Request a hot-unplug *)
 let request_close name (domid, devid) =
+  let open Lwt.Infix in
   make ()
   >>= fun client ->
   mk_backend_path client name (domid,devid)
@@ -371,6 +382,7 @@ let request_close name (domid, devid) =
   writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (Blkproto.State.to_assoc_list Blkproto.State.Closing))
 
 let force_close (domid, device) =
+  let open Lwt.Infix in
   make ()
   >>= fun client ->
   mk_frontend_path client (domid, device)
@@ -378,16 +390,14 @@ let force_close (domid, device) =
   write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed)
 
 let run ?(max_indirect_segments=256) t name (domid,devid) =
+  let open Lwt.Infix in
   make ()
   >>= fun client ->
   let xg = Gnttab.interface_open () in
   let xe = Eventchn.init () in
 
-  let open BlockError in
-
   mk_backend_path client name (domid,devid)
   >>= fun backend_path ->
-
   (* Tell xapi we've noticed the backend *)
   write_one client
     (backend_path ^ "/" ^ Blkproto.Hotplug._hotplug_status)
@@ -440,14 +450,20 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     let device_read ofs bufs =
       Lwt.catch
         (fun () ->
+          let open BlockError in
           B.read t ofs bufs
+          >>= fun () ->
+          return ()
         ) (fun e ->
           printf "blkback: read exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
           Lwt.fail e) in
     let device_write ofs bufs =
       Lwt.catch
         (fun () ->
+          let open BlockError in
           B.write t ofs bufs
+          >>= fun () ->
+          return ()
         ) (fun e ->
           printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
           Lwt.fail e) in
@@ -480,6 +496,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     fail e)
 
 let create ?backend_domid name (domid, device) =
+  let open Lwt.Infix in
   make ()
   >>= fun client ->
   (* Construct the device: *)
@@ -513,6 +530,7 @@ let create ?backend_domid name (domid, device) =
   )
 
 let destroy name (domid, device) =
+  let open Lwt.Infix in
   make ()
   >>= fun client ->
   mk_backend_path client name (domid, device)
