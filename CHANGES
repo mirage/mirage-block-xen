@@ -1,3 +1,10 @@
+1.4.0 (13-Mar-2016)
+* Remove dependency on camlp4; use ppx instead
+* opam: now pass lint check
+* use logs rather than printf
+* blkfront: serialise calls to `connect`
+* blkfront: strip deprecated prefixes like aio: from params keys
+
 1.3.1 (07-Mar-2015)
 * Add an explicit `connect` to the interface signature (#35)
 
