@@ -20,7 +20,7 @@ Library mirage_block_xen_front
   Findlibparent:      mirage_block_xen
   Findlibname:        front
   Modules:            Blkfront, Block
-  BuildDepends:       lwt, cstruct (>= 1.9.0), cstruct.ppx, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, mirage-xen
+  BuildDepends:       logs, lwt, cstruct (>= 1.9.0), cstruct.ppx, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, mirage-xen
 
 Library mirage_block_xen_back
   CompiledObject:     best
