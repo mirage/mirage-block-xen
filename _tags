@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 237c0feece202e117a00c80385e93d38)
+# DO NOT EDIT (digest: 8f343e5b11d3863af6067eaddbba95f4)
 # Ignore VCS directories, you can use the same kind of rule outside
 # OASIS_START/STOP if you want to exclude directories that contains
 # useless stuff for the build process
@@ -23,10 +23,9 @@ true: annot, bin_annot
 # Library mirage_block_xen_back
 "lib/mirage_block_xen_back.cmxs": use_mirage_block_xen_back
 <lib/*.ml{,i,y}>: pkg_cstruct
-<lib/*.ml{,i,y}>: pkg_cstruct.syntax
+<lib/*.ml{,i,y}>: pkg_cstruct.ppx
 <lib/*.ml{,i,y}>: pkg_io-page
 <lib/*.ml{,i,y}>: pkg_lwt
-<lib/*.ml{,i,y}>: pkg_lwt.syntax
 <lib/*.ml{,i,y}>: pkg_shared-memory-ring
 <lib/*.ml{,i,y}>: pkg_shared-memory-ring.lwt
 <lib/*.ml{,i,y}>: pkg_xen-evtchn
@@ -35,4 +34,3 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: use_mirage_block_xen
 # OASIS_STOP
 <configure.*>: not_hygienic
-<*/*>: syntax_camlp4o, pkg_lwt.syntax, pkg_cstruct.syntax

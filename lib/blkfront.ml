@@ -62,9 +62,11 @@ let alloc ~order (num,domid) =
   let buf = Io_page.get_order order in
 
   let pages = Io_page.to_pages buf in
-  lwt gnts = Gntshr.get_n (List.length pages) in
-  List.iter (fun (gnt, page) -> 
-      Gntshr.grant_access ~domid ~writable:true gnt page) 
+  let open Lwt.Infix in
+  Gntshr.get_n (List.length pages)
+  >>= fun gnts ->
+  List.iter (fun (gnt, page) ->
+      Gntshr.grant_access ~domid ~writable:true gnt page)
     (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
@@ -76,7 +78,9 @@ let alloc ~order (num,domid) =
 (* Thread to poll for responses and activate wakeners *)
 let poll t =
   let rec loop from =
-    lwt next = Activations.after t.evtchn from in
+    let open Lwt.Infix in
+    Activations.after t.evtchn from
+    >>= fun next ->
     let () = Lwt_ring.Front.poll t.client (Res.read_response) in
     loop next in
   loop Activations.program_start
@@ -84,38 +88,49 @@ let poll t =
 (* Given a VBD ID and a backend domid, construct a blkfront record.
    Note the logic in Block.connect below to only call this once per device *)
 let plug (id:id) =
-  lwt vdev = try return (int_of_string id)
-    with _ -> fail (Failure "invalid vdev") in
+  let open Lwt.Infix in
+  ( try return (int_of_string id)
+    with _ -> fail (Failure "invalid vdev") )
+  >>= fun vdev ->
   printf "Blkfront.create; vdev=%d\n%!" vdev;
   let node = sprintf "device/vbd/%d/%s" vdev in
 
-  lwt xs = Xs.make () in
-  lwt backend_id = Xs.(immediate xs (fun h -> read h (node "backend-id"))) in
-  lwt backend_id = try_lwt return (int_of_string backend_id)
-    with _ -> fail (Failure "invalid backend_id") in
-  lwt backend = Xs.(immediate xs (fun h -> read h (node "backend"))) in
+  Xs.make ()
+  >>= fun xs ->
+  Xs.(immediate xs (fun h -> read h (node "backend-id")))
+  >>= fun backend_id ->
+  ( Lwt.catch
+    (fun () -> return (int_of_string backend_id))
+    (fun _ -> fail (Failure "invalid backend_id")) )
+  >>= fun backend_id ->
+  Xs.(immediate xs (fun h -> read h (node "backend")))
+  >>= fun backend ->
 
   let backend_read fn default k =
     let backend = sprintf "%s/%s" backend in
-    try_lwt
-      lwt s = Xs.(immediate xs (fun h -> read h (backend k))) in
-      return (fn s)
-    with exn -> return default in
+    Lwt.catch
+      (fun () ->
+        Xs.(immediate xs (fun h -> read h (backend k)))
+        >>= fun s ->
+        return (fn s)
+      ) (fun exn -> return default) in
 
   (* The backend can advertise a multi-page ring: *)
-  lwt backend_max_ring_page_order = backend_read int_of_string 0 "max-ring-page-order" in
+  backend_read int_of_string 0 "max-ring-page-order"
+  >>= fun backend_max_ring_page_order ->
   if backend_max_ring_page_order = 0
   then printf "Blkback can only use a single-page ring\n%!"
   else printf "Blkback advertises multi-page ring (size 2 ** %d pages)\n%!" backend_max_ring_page_order;
 
   let our_max_ring_page_order = 2 in (* 4 pages *)
   let ring_page_order = min our_max_ring_page_order backend_max_ring_page_order in
-  printf "Negotiated a %s\n%!" 
-    (if ring_page_order = 0 then 
-       "single-page ring" else 
+  printf "Negotiated a %s\n%!"
+    (if ring_page_order = 0 then
+       "single-page ring" else
        sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
 
-  lwt (gnts, ring, client) = alloc ~order:ring_page_order (vdev,backend_id) in
+  alloc ~order:ring_page_order (vdev,backend_id)
+  >>= fun (gnts, ring, client) ->
   let evtchn = Eventchn.bind_unbound_port h backend_id in
   let port = Eventchn.to_int evtchn in
   let ring_info =
@@ -131,25 +146,33 @@ let plug (id:id) =
     "protocol", "x86_64-abi";
     "state", Device_state.(to_string Connected)
   ] @ ring_info in
-  lwt () = Xs.(transaction xs (fun h ->
+  Xs.(transaction xs (fun h ->
       Lwt_list.iter_s (fun (k, v) -> write h (node k) v) info
-    )) in
-  lwt () = Xs.(wait xs (fun h ->
-      lwt state = read h (sprintf "%s/state" backend) in
+    ))
+  >>= fun () ->
+  Xs.(wait xs (fun h ->
+      read h (sprintf "%s/state" backend)
+      >>= fun state ->
       if Device_state.(of_string state = Connected) then return () else fail Xs_protocol.Eagain
-    )) in
+    ))
+  >>= fun () ->
   (* Read backend info *)
-  lwt max_indirect_segments = backend_read int_of_string 0 FeatureIndirect._max_indirect_segments in
+  backend_read int_of_string 0 FeatureIndirect._max_indirect_segments
+  >>= fun max_indirect_segments ->
   (* Limit to one page for now *)
   let max_indirect_segments = min max_indirect_segments Req.Proto_64.segments_per_indirect_page in
-  lwt info =
-    lwt state = backend_read (Device_state.of_string) Device_state.Unknown "state" in
+  ( backend_read (Device_state.of_string) Device_state.Unknown "state"
+    >>= fun state ->
     printf "state=%s\n%!" (Device_state.prettyprint state);
-    lwt size_sectors = backend_read Int64.of_string (-1L) "sectors" in
-    lwt sector_size = backend_read int_of_string 0 "sector-size" in
-    lwt read_write = backend_read (fun x -> x = "w") false "mode" in
-    return { sector_size; size_sectors; read_write }
-  in
+    backend_read Int64.of_string (-1L) "sectors"
+    >>= fun size_sectors ->
+    backend_read int_of_string 0 "sector-size"
+    >>= fun sector_size ->
+    backend_read (fun x -> x = "w") false "mode"
+    >>= fun read_write ->
+    return { sector_size; size_sectors; read_write } )
+  >>= fun info ->
+
   printf "Blkfront info: sector_size=%u sectors=%Lu max_indirect_segments=%d\n%!"
     info.sector_size info.size_sectors max_indirect_segments;
   Eventchn.unmask h evtchn;
@@ -165,32 +188,43 @@ let unplug id =
 
 (** Return a list of valid VBDs *)
 let enumerate () =
-  lwt xs = Xs.make () in
-  try_lwt
-    Xs.(immediate xs (fun h -> directory h "device/vbd"))
-  with
-  | Xs_protocol.Enoent _ ->
-    return []
-  | e ->
-    printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
-    return []
+  let open Lwt.Infix in
+  Xs.make ()
+  >>= fun xs ->
+  Lwt.catch
+    (fun () ->
+      Xs.(immediate xs (fun h -> directory h "device/vbd"))
+    ) (function
+    | Xs_protocol.Enoent _ ->
+      return []
+    | e ->
+      printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
+      return []
+    )
 
 (** Return a list of pairs [backend-params-key, frontend-id].
     This is only intended to be a heuristic for 'connect' below. *)
 let params_to_frontend_ids ids =
-  lwt xs = Xs.make () in
+  let open Lwt.Infix in
+  Xs.make ()
+  >>= fun xs ->
   Lwt_list.fold_left_s (fun list id ->
-    try_lwt
-      lwt backend = Xs.(immediate xs (fun h -> read h (Printf.sprintf "device/vbd/%s/backend" id))) in
-      lwt params = Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend))) in
-      return ((params, id) :: list)
-    with Xs_protocol.Enoent path ->
-      printf "Blkif.params_to_frontend_ids: missing %s\n" path;
-      return list
-    | e ->
-      printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
-      return list
-  ) [] ids
+    Lwt.catch
+      (fun () ->
+        Xs.(immediate xs (fun h -> read h (Printf.sprintf "device/vbd/%s/backend" id)))
+        >>= fun backend ->
+        Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend)))
+        >>= fun params ->
+        return ((params, id) :: list)
+      ) (function
+        | Xs_protocol.Enoent path ->
+          printf "Blkif.params_to_frontend_ids: missing %s\n" path;
+          return list
+        | e ->
+          printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
+          return list
+        )
+    ) [] ids
 
 (** Create a Direct request if we have 11 or fewer requests, else an Indirect request. *)
 let with_segs t ~start_offset ~end_offset rs fn =
@@ -229,7 +263,8 @@ let with_segs t ~start_offset ~end_offset rs fn =
 let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) pages =
   let len = List.length pages in
   let rec retry () =
-    try_lwt
+    Lwt.catch
+      (fun () ->
       Gntshr.with_refs len
         (fun rs ->
            Gntshr.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
@@ -240,9 +275,11 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
                   let id = Int64.of_int rs.(0) in
                   let sector = Int64.(add start_sector (of_int start_offset)) in
                   let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
-                  lwt res = Lwt_ring.Front.push_request_and_wait t.t.client
+                  let open Lwt.Infix in
+                  Lwt_ring.Front.push_request_and_wait t.t.client
                       (fun () -> Eventchn.notify h t.t.evtchn)
-                      (Req.Proto_64.write_request req) in
+                      (Req.Proto_64.write_request req)
+                  >>= fun res ->
                   let open Res in
                   match res.st with
                   | Some Error -> fail (IO_error "read")
@@ -252,9 +289,9 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
                 )
              )
         )
-    with
-    | Lwt_ring.Shutdown -> retry ()
-    | exn -> fail exn in
+    ) (function
+      | Lwt_ring.Shutdown -> retry ()
+      | exn -> fail exn) in
   retry ()
 
 (* THIS FUNCTION IS DEPRECATED. Use 'write' instead.
@@ -332,11 +369,13 @@ let read_512 t sector num_sectors =
     let open Single_request in
     let len = npages_of r in
     let pages = Io_page.(to_pages (get len)) in
-    lwt () = single_request_into Req.Read t r.start_sector 
-        ~start_offset:r.start_offset ~end_offset:r.end_offset pages in
-    return (Lwt_stream.of_list 
-              (List.rev 
-                 (snd 
+    let open Lwt.Infix in
+    single_request_into Req.Read t r.start_sector
+        ~start_offset:r.start_offset ~end_offset:r.end_offset pages
+    >>= fun () ->
+    return (Lwt_stream.of_list
+              (List.rev
+                 (snd
                     (List.fold_left
                        (fun (i, acc) page ->
                           let start_offset = match i with
@@ -354,7 +393,9 @@ let read_512 t sector num_sectors =
 
 let resume t =
   let vdev = sprintf "%d" t.vdev in
-  lwt transport = plug vdev in
+  let open Lwt.Infix in
+  plug vdev
+  >>= fun transport ->
   let old_t = t.t in
   t.t <- transport;
   Lwt_ring.Front.shutdown old_t.client;
@@ -362,8 +403,9 @@ let resume t =
 
 let resume () =
   let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
+  let open Lwt.Infix in
   Lwt_list.iter_p (fun (k,v) ->
-    lwt v = v in
+    v >>= fun v ->
     resume v
   ) devs
 
@@ -403,7 +445,7 @@ let sector t x =
 let get_info t =
   let sector_size = get_sector_size t in
   let size_sectors = Int64.(
-      div t.t.info.size_sectors 
+      div t.t.info.size_sectors
         (of_int (sector_size / t.t.info.sector_size))) in
   let info = { t.t.info with sector_size; size_sectors } in
   return info
@@ -413,17 +455,23 @@ let rec multiple_requests_into op t start_sector = function
   | remaining ->
     let max_segments_per_request = max 11 t.t.max_indirect_segments in
     let pages, remaining = take remaining max_segments_per_request in
-    lwt () = single_request_into op t start_sector pages in
+    let open Lwt.Infix in
+    single_request_into op t start_sector pages
+    >>= fun () ->
     let start_sector = Int64.(add start_sector (of_int (max_segments_per_request * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
 let connect id =
+  let open Lwt.Infix in
   if Hashtbl.mem devices id then begin
-    lwt d = Hashtbl.find devices id in
+    Hashtbl.find devices id
+    >>= fun d ->
     return (`Ok d)
   end else begin
-    lwt all = enumerate () in
-    lwt list = params_to_frontend_ids all in
+    enumerate ()
+    >>= fun all ->
+    params_to_frontend_ids all
+    >>= fun list ->
     (* Apply a set of heuristics to locate the disk:
        if [id] is a xen virtual disk bus slot number (e.g. 51712) then use it
        if [id] is a "linux device string" (e.g. "xvda" or "/dev/xvda") then translate it
@@ -464,7 +512,7 @@ let connect id =
     | Some id' when Hashtbl.mem devices id' ->
       let t = Hashtbl.find devices id' in
       Hashtbl.replace devices id t;
-      lwt d = t in
+      t >>= fun d ->
       return (`Ok d)
     | Some id' ->
       printf "Block.connect %s -> %s\n%!" id id';
@@ -472,16 +520,17 @@ let connect id =
       Hashtbl.replace devices id' t;
       Hashtbl.replace devices id t;
       (* id' is now in devices, so no-one will call plug in parallel with us *)
-      lwt trans = plug id' in
+      plug id'
+      >>= fun trans ->
       let dev = { vdev = int_of_string id';
                   t = trans } in
       Lwt.wakeup u dev;
       return (`Ok dev)
     | None ->
       printf "Block.connect %s: could not find device\n" id;
-      return (`Error (`Unknown 
-                        (Printf.sprintf "device %s not found (available = [ %s ])" 
-                           id (String.concat ", " all)))) 
+      return (`Error (`Unknown
+                        (Printf.sprintf "device %s not found (available = [ %s ])"
+                           id (String.concat ", " all))))
   end
 
 let id t = string_of_int t.vdev
@@ -495,23 +544,27 @@ let to_iopages x =
   try return (List.map to_iopage x)
   with e -> fail e
 
-let ( >>= ) x f = match x with
-  | `Error _ -> x
-  | `Ok x -> f x
-
 let read t start_sector pages =
-  lwt pages = to_iopages pages in
-  try_lwt
-    lwt () = multiple_requests_into Req.Read t (sector t start_sector) pages in
-    return (`Ok ())
-  with e -> return (`Error (`Unknown (Printexc.to_string e)))
+  let open Lwt.Infix in
+  to_iopages pages
+  >>= fun pages ->
+  Lwt.catch
+    (fun () ->
+      multiple_requests_into Req.Read t (sector t start_sector) pages
+      >>= fun () ->
+      return (`Ok ())
+    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let write t start_sector pages =
-  lwt pages = to_iopages pages in
-  try_lwt
-    lwt () = multiple_requests_into Req.Write t (sector t start_sector) pages in
-    return (`Ok ())
-  with e -> return (`Error (`Unknown (Printexc.to_string e)))
+  let open Lwt.Infix in
+  to_iopages pages
+  >>= fun pages ->
+  Lwt.catch
+    (fun () ->
+      multiple_requests_into Req.Write t (sector t start_sector) pages
+      >>= fun () ->
+      return (`Ok ())
+    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let _ =
   printf "Blkif: add resume hook\n%!";
