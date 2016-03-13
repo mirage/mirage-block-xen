@@ -2,6 +2,7 @@
 all: build doc
 
 NAME=mirage-block-xen
+IMAGE=$(NAME)
 J=4
 
 include config.mk
@@ -38,6 +39,12 @@ test: setup.bin build
 reinstall: setup.bin
 	@ocamlfind remove $(NAME) || true
 	@./setup.bin -reinstall
+
+xen-depends: Dockerfile build.sh
+	docker build -t $(IMAGE) .
+
+xen-build: xen-depends clean
+	docker run -v $(shell pwd):/src $(IMAGE) /build.sh
 
 clean:
 	@ocamlbuild -clean
