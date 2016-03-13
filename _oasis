@@ -20,7 +20,7 @@ Library mirage_block_xen_front
   Findlibparent:      mirage_block_xen
   Findlibname:        front
   Modules:            Blkfront, Block
-  BuildDepends:       lwt, lwt.syntax, cstruct (>= 1.9.0), cstruct.ppx, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, mirage-xen
+  BuildDepends:       lwt, cstruct (>= 1.9.0), cstruct.ppx, mirage-types, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, mirage-xen
 
 Library mirage_block_xen_back
   CompiledObject:     best
@@ -28,4 +28,4 @@ Library mirage_block_xen_back
   Findlibparent:      mirage_block_xen
   Findlibname:        back
   Modules:            Blkback, Block_request
-  BuildDepends:       lwt, lwt.syntax, cstruct (>= 1.9.0), cstruct.ppx, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, xenstore
+  BuildDepends:       lwt, cstruct (>= 1.9.0), cstruct.ppx, io-page, shared-memory-ring, shared-memory-ring.lwt, mirage-block-xen, xen-evtchn, xen-gnt, xenstore

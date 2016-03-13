@@ -35,4 +35,3 @@ true: annot, bin_annot
 <lib/*.ml{,i,y}>: use_mirage_block_xen
 # OASIS_STOP
 <configure.*>: not_hygienic
-<*/*>: syntax_camlp4o, pkg_lwt.syntax, pkg_cstruct.syntax
