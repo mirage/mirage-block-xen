@@ -356,7 +356,11 @@ let read_one client k = immediate client (fun xs ->
 
 let write_one client k v = immediate client (fun xs -> write xs k v)
 
-let exists client k = match_lwt read_one client k with `Error _ -> return false | _ -> return true
+let exists client k =
+ read_one client k
+ >>= function
+ | `Error _ -> return false
+ | _ -> return true
 
 (* Request a hot-unplug *)
 let request_close name (domid, devid) =
@@ -405,7 +409,8 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     let features = Blkproto.FeatureIndirect.(to_assoc_list { max_indirect_segments}) in
     writev client (List.map (fun (k, v) -> backend_path ^ "/" ^ k, v) (di @ features))
     >>= fun () ->
-    ( match_lwt read_one client (backend_path ^ "/frontend") with
+    ( read_one client (backend_path ^ "/frontend")
+      >>= function
       | `Error x -> failwith x
       | `OK x -> return x )
     >>= fun frontend_path ->
