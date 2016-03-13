@@ -299,12 +299,14 @@ module Req = struct
       t.handle t.id t.sector (string_of_segs t.segs) t.nr_segs
 
   (* The segment looks the same in both 32-bit and 64-bit versions *)
-  cstruct segment {
-    uint32_t       gref;
-    uint8_t        first_sector;
-    uint8_t        last_sector;
-    uint16_t       _padding
-  } as little_endian
+  [%%cstruct
+  type segment = {
+    gref: uint32_t;
+    first_sector: uint8_t;
+    last_sector: uint8_t;
+    _padding: uint16_t;
+  } [@@little_endian]
+  ]
   let _ = assert (sizeof_segment = 8)
 
   let get_segments payload nr_segs =
@@ -398,60 +400,69 @@ module Req = struct
       end
   end
   module Proto_64 = Marshalling(struct
-    cstruct hdr {
-      uint8_t        op;
-      uint8_t        nr_segs;
-      uint16_t       handle;
-      uint32_t       _padding; (* emitted by C compiler *)
-      uint64_t       id;
-      uint64_t       sector
-    } as little_endian
+    [%%cstruct
+    type hdr = {
+      op: uint8_t;
+      nr_segs: uint8_t;
+      handle: uint16_t;
+      _padding: uint32_t; (* emitted by C compiler *)
+      id: uint64_t;
+      sector: uint64_t;
+    } [@@little_endian]
+    ]
   end) (struct
-    cstruct hdr {
-      uint8_t        op;
-      uint8_t        indirect_op;
-      uint16_t       nr_segs;
-      uint32_t       _padding1;
-      uint64_t       id;
-      uint64_t       sector;
-      uint16_t       handle;
-      uint16_t       _padding2;
+    [%%cstruct
+    type hdr = {
+      op: uint8_t;
+      indirect_op: uint8_t;
+      nr_segs: uint16_t;
+      _padding1: uint32_t;
+      id: uint64_t;
+      sector: uint64_t;
+      handle: uint16_t;
+      _padding2: uint16_t;
       (* up to 8 grant references *)
-    } as little_endian
+    } [@@little_endian]
+    ]
   end)
 
   module Proto_32 = Marshalling(struct
-    cstruct hdr {
-      uint8_t        op;
-      uint8_t        nr_segs;
-      uint16_t       handle;
+    [%%cstruct
+    type hdr = {
+      op: uint8_t;
+      nr_segs: uint8_t;
+      handle: uint16_t;
       (* uint32_t       _padding; -- not included *)
-      uint64_t       id;
-      uint64_t       sector
-    } as little_endian
+      id: uint64_t;
+      sector: uint64_t;
+    } [@@little_endian]
+    ]
   end) (struct
-    cstruct hdr {
-      uint8_t        op;
-      uint8_t        indirect_op;
-      uint16_t       nr_segs;
-      uint64_t       id;
-      uint64_t       sector;
-      uint16_t       handle;
-      uint16_t       _padding1;
+    [%%cstruct
+    type hdr = {
+      op: uint8_t;
+      indirect_op: uint8_t;
+      nr_segs: uint16_t;
+      id: uint64_t;
+      sector: uint64_t;
+      handle: uint16_t;
+      _padding1: uint16_t;
       (* up to 8 grant references *)
-    } as little_endian
+    } [@@little_endian]
+    ]
   end)
 end
 
 module Res = struct
 
   (* Defined in include/xen/io/blkif.h, BLKIF_RSP_* *)
-  cenum rsp {
-    OK            = 0;
-    Error         = 0xffff;
-    Not_supported = 0xfffe
-  } as uint16_t
-
+  [%%cenum
+  type rsp =
+    | OK            [@id 0]
+    | Error         [@id 0xffff]
+    | Not_supported [@id 0xfffe]
+    [@@uint16_t]
+  ]
   (* Defined in include/xen/io/blkif.h, blkif_response_t *)
   type t = {
     op: Req.op option;
@@ -460,15 +471,16 @@ module Res = struct
 
   (* The same structure is used in both the 32- and 64-bit protocol versions,
      modulo the extra padding at the end. *)
-  cstruct response_hdr {
-    uint64_t       id;
-    uint8_t        op;
-    uint8_t        _padding;
-    uint16_t       st;
+  [%%cstruct
+  type response_hdr = {
+    id: uint64_t;
+    op: uint8_t;
+    _padding: uint8_t;
+    st: uint16_t;
     (* 64-bit only but we don't need to care since there aren't any more fields: *)
-    uint32_t       _padding2
-  } as little_endian
-
+    _padding2: uint32_t;
+  } [@@little_endian]
+  ]
   let write_response (id, t) slot =
     set_response_hdr_id slot id;
     set_response_hdr_op slot (match t.op with None -> -1 | Some x -> Req.op_to_int x);
