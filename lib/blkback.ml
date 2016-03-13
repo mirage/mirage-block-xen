@@ -236,11 +236,12 @@ let service_thread t stats =
       | [], _ -> return ()
       | now, later ->
         Lwt_list.iter_p (fun r ->
-          ( try_lwt
+          Lwt.catch
+            (fun () ->
               (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers
               >>= fun () ->
               return Res.OK
-            with e ->
+            ) (fun e ->
               return Res.Error )
           >>= fun result ->
           let open Res in
@@ -310,11 +311,14 @@ open X
 
 let get_my_domid client =
   immediate client (fun xs ->
-    try_lwt
-      read xs "domid"
-      >>= fun domid ->
-      return (int_of_string domid)
-    with Xs_protocol.Enoent _ -> return 0)
+    Lwt.catch
+      (fun () ->
+        read xs "domid"
+        >>= fun domid ->
+        return (int_of_string domid)
+      ) (function
+        | Xs_protocol.Enoent _ -> return 0
+        | e -> fail e)
 
 let mk_backend_path client name (domid,devid) =
   get_my_domid client
@@ -332,21 +336,23 @@ let writev client pairs =
 let readv client path keys =
   immediate client (fun xs ->
     Lwt_list.map_s (fun k ->
-      try_lwt
-        read xs (path ^ "/" ^ k)
-        >>= fun v ->
-        return (Some (k, v))
-      with _ -> return None) keys
+      Lwt.catch
+        (fun () ->
+          read xs (path ^ "/" ^ k)
+          >>= fun v ->
+          return (Some (k, v))
+        ) (fun _ -> return None) keys
   )
   >>= fun options ->
   return (List.fold_left (fun acc x -> match x with None -> acc | Some y -> y :: acc) [] options)
 
 let read_one client k = immediate client (fun xs ->
-  try_lwt
-    read xs k
-    >>= fun v ->
-    return (`OK v)
-  with _ -> return (`Error ("failed to read: " ^ k)))
+  Lwt.catch
+    (fun () ->
+      read xs k
+      >>= fun v ->
+      return (`OK v)
+    ) (fun _ -> return (`Error ("failed to read: " ^ k)))
 
 let write_one client k v = immediate client (fun xs -> write xs k v)
 
@@ -384,8 +390,8 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     Blkproto.Hotplug._online
   >>= fun () ->
 
-  try_lwt
-
+  Lwt.catch
+  (fun () ->
     B.get_info t
     >>= fun info ->
 
@@ -406,14 +412,17 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
 
     (* wait for the frontend to enter state Initialised *)
     wait client (fun xs ->
-      try_lwt
-        read xs (frontend_path ^ "/" ^ Blkproto.State._state)
-        >>= fun state ->
-        if Blkproto.State.of_string state = Some Blkproto.State.Initialised
-        || Blkproto.State.of_string state = Some Blkproto.State.Connected
-        then return ()
-        else raise Xs_protocol.Eagain
-      with Xs_protocol.Enoent _ -> raise Xs_protocol.Eagain
+      Lwt.catch
+        (fun () ->
+          read xs (frontend_path ^ "/" ^ Blkproto.State._state)
+          >>= fun state ->
+          if Blkproto.State.of_string state = Some Blkproto.State.Initialised
+          || Blkproto.State.of_string state = Some Blkproto.State.Connected
+          then return ()
+          else raise Xs_protocol.Eagain
+        ) (function
+          | Xs_protocol.Enoent _ -> raise Xs_protocol.Eagain
+          | e -> fail e)
     )
     >>= fun () ->
 
@@ -424,19 +433,19 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
       | `Error x -> failwith x in
     printf "%s\n%!" (Blkproto.RingInfo.to_string ring_info);
     let device_read ofs bufs =
-      try_lwt
-        B.read t ofs bufs >>= fun () ->
-        return ()
-      with e ->
-        printf "blkback: read exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
-        Lwt.fail e in
+      Lwt.catch
+        (fun () ->
+          B.read t ofs bufs
+        ) (fun e ->
+          printf "blkback: read exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+          Lwt.fail e) in
     let device_write ofs bufs =
-      try_lwt
-        B.write t ofs bufs >>= fun () ->
-        return ()
-      with e ->
-        printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
-        Lwt.fail e in
+      Lwt.catch
+        (fun () ->
+          B.write t ofs bufs
+        ) (fun e ->
+          printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+          Lwt.fail e) in
     let be_thread, stats = init xg xe domid ring_info {
       read = device_read;
       write = device_write;
@@ -445,23 +454,25 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     >>= fun () ->
     (* wait for the frontend to disappear or enter a Closed state *)
     wait client (fun xs ->
-      try_lwt
-        read xs (frontend_path ^ "/state")
-        >>= fun state ->
-        if Blkproto.State.of_string state <> (Some Blkproto.State.Closed)
-        then raise Xs_protocol.Eagain
-        else return ()
-      with Xs_protocol.Enoent _ ->
-        return ()
+      Lwt.catch
+        (fun () ->
+          read xs (frontend_path ^ "/state")
+          >>= fun state ->
+          if Blkproto.State.of_string state <> (Some Blkproto.State.Closed)
+          then raise Xs_protocol.Eagain
+          else return ()
+        ) (function
+          | Xs_protocol.Enoent _ -> return ()
+          | e -> fail e)
     )
     >>= fun () ->
     Lwt.cancel be_thread;
     Lwt.return stats
-  with e ->
+  )(fun e ->
     printf "blkback caught %s\n%!" (Printexc.to_string e);
     B.disconnect t
     >>= fun () ->
-    fail e
+    fail e)
 
 let create ?backend_domid name (domid, device) =
   make ()
@@ -504,8 +515,8 @@ let destroy name (domid, device) =
   mk_frontend_path client (domid, device)
   >>= fun frontend_path ->
   immediate client (fun xs ->
-    (try_lwt rm xs backend_path with _ -> return ())
+    (Lwt.catch (fun () -> rm xs backend_path) (fun _ -> return ()))
     >>= fun () ->
-    (try_lwt rm xs frontend_path with _ -> return ())
+    (Lwt.catch (fun () -> rm xs frontend_path) (fun _ -> return ()))
   )
 end

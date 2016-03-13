@@ -96,19 +96,21 @@ let plug (id:id) =
   >>= fun xs ->
   Xs.(immediate xs (fun h -> read h (node "backend-id")))
   >>= fun backend_id ->
-  ( try_lwt return (int_of_string backend_id)
-    with _ -> fail (Failure "invalid backend_id") )
+  ( Lwt.catch
+    (fun () -> return (int_of_string backend_id))
+    (fun _ -> fail (Failure "invalid backend_id")) )
   >>= fun backend_id ->
   Xs.(immediate xs (fun h -> read h (node "backend")))
   >>= fun backend ->
 
   let backend_read fn default k =
     let backend = sprintf "%s/%s" backend in
-    try_lwt
-      Xs.(immediate xs (fun h -> read h (backend k)))
-      >>= fun s ->
-      return (fn s)
-    with exn -> return default in
+    Lwt.catch
+      (fun () ->
+        Xs.(immediate xs (fun h -> read h (backend k)))
+        >>= fun s ->
+        return (fn s)
+      ) (fun exn -> return default) in
 
   (* The backend can advertise a multi-page ring: *)
   backend_read int_of_string 0 "max-ring-page-order"
@@ -185,14 +187,16 @@ let unplug id =
 let enumerate () =
   Xs.make ()
   >>= fun xs ->
-  try_lwt
-    Xs.(immediate xs (fun h -> directory h "device/vbd"))
-  with
-  | Xs_protocol.Enoent _ ->
-    return []
-  | e ->
-    printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
-    return []
+  Lwt.catch
+    (fun () ->
+      Xs.(immediate xs (fun h -> directory h "device/vbd"))
+    ) (function
+    | Xs_protocol.Enoent _ ->
+      return []
+    | e ->
+      printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
+      return []
+    )
 
 (** Return a list of pairs [backend-params-key, frontend-id].
     This is only intended to be a heuristic for 'connect' below. *)
@@ -200,19 +204,22 @@ let params_to_frontend_ids ids =
   Xs.make ()
   >>= fun xs ->
   Lwt_list.fold_left_s (fun list id ->
-    try_lwt
-      Xs.(immediate xs (fun h -> read h (Printf.sprintf "device/vbd/%s/backend" id)))
-      >>= fun backend ->
-      Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend)))
-      >>= fun params ->
-      return ((params, id) :: list)
-    with Xs_protocol.Enoent path ->
-      printf "Blkif.params_to_frontend_ids: missing %s\n" path;
-      return list
-    | e ->
-      printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
-      return list
-  ) [] ids
+    Lwt.catch
+      (fun () ->
+        Xs.(immediate xs (fun h -> read h (Printf.sprintf "device/vbd/%s/backend" id)))
+        >>= fun backend ->
+        Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend)))
+        >>= fun params ->
+        return ((params, id) :: list)
+      ) (function
+        | Xs_protocol.Enoent path ->
+          printf "Blkif.params_to_frontend_ids: missing %s\n" path;
+          return list
+        | e ->
+          printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
+          return list
+        )
+    ) [] ids
 
 (** Create a Direct request if we have 11 or fewer requests, else an Indirect request. *)
 let with_segs t ~start_offset ~end_offset rs fn =
@@ -251,7 +258,8 @@ let with_segs t ~start_offset ~end_offset rs fn =
 let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) pages =
   let len = List.length pages in
   let rec retry () =
-    try_lwt
+    Lwt.catch
+      (fun () ->
       Gntshr.with_refs len
         (fun rs ->
            Gntshr.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
@@ -275,9 +283,9 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
                 )
              )
         )
-    with
-    | Lwt_ring.Shutdown -> retry ()
-    | exn -> fail exn in
+    ) (function
+      | Lwt_ring.Shutdown -> retry ()
+      | exn -> fail exn) in
   retry ()
 
 (* THIS FUNCTION IS DEPRECATED. Use 'write' instead.
@@ -531,20 +539,22 @@ let ( >>= ) x f = match x with
 let read t start_sector pages =
   to_iopages pages
   >>= fun pages ->
-  try_lwt
-    multiple_requests_into Req.Read t (sector t start_sector) pages
-    >>= fun () ->
-    return (`Ok ())
-  with e -> return (`Error (`Unknown (Printexc.to_string e)))
+  Lwt.catch
+    (fun () ->
+      multiple_requests_into Req.Read t (sector t start_sector) pages
+      >>= fun () ->
+      return (`Ok ())
+    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let write t start_sector pages =
   to_iopages pages
   >>= fun pages ->
-  try_lwt
-    multiple_requests_into Req.Write t (sector t start_sector) pages
-    >>= fun () ->
-    return (`Ok ())
-  with e -> return (`Error (`Unknown (Printexc.to_string e)))
+  Lwt.catch
+    (fun () ->
+      multiple_requests_into Req.Write t (sector t start_sector) pages
+      >>= fun () ->
+      return (`Ok ())
+    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let _ =
   printf "Blkif: add resume hook\n%!";
