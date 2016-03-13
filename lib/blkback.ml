@@ -15,6 +15,13 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+let src =
+  let src = Logs.Src.create "blkback" ~doc:"Mirage Xen blkback" in
+  Logs.Src.set_level src (Some Logs.Info);
+  src
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 module type ACTIVATIONS = sig
 
 (** Event channels handlers. *)
@@ -108,10 +115,10 @@ let is_writable req = match req.Req.op with
 | Some Req.Read -> true (* we need to write into the page *)
 | Some Req.Write -> false (* we read from the guest and write to the backend *)
 | None ->
-  printf "FATAL: unknown request type\n%!";
+  Log.err (fun f -> f "FATAL: unknown request type");
   failwith "unknown request type"
 | Some op ->
-  printf "FATAL: unhandled request type %s\n%!" (Req.string_of_op op);
+  Log.err (fun f -> f "FATAL: unhandled request type %s" (Req.string_of_op op));
   failwith "unhandled request type"
 
 module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
@@ -134,7 +141,7 @@ let service_thread t stats =
 
     let lookup_mapping gref =
       if not(Hashtbl.mem grant_table gref) then begin
-        printf "FATAL: failed to find mapped grant reference %ld\n%!" gref;
+        Log.err (fun f -> f "FATAL: failed to find mapped grant reference %ld" gref);
         failwith "failed to find mapped grant reference"
       end else Hashtbl.find grant_table gref in
 
@@ -143,7 +150,7 @@ let service_thread t stats =
       | grants ->
         begin match Gnttab.mapv t.xg grants writable with
           | None ->
-            printf "FATAL: failed to map batch of %d grant references\n%!" (List.length grants);
+            Log.err (fun f -> f "FATAL: failed to map batch of %d grant references" (List.length grants));
             failwith "Failed to map grants" (* TODO: handle this error cleanly *)
           | Some x ->
             let buf = Io_page.to_cstruct (Gnttab.Local_mapping.to_buf x) in
@@ -154,7 +161,7 @@ let service_thread t stats =
       try
         Opt.iter (Gnttab.unmap_exn t.xg) mapping
       with e ->
-        printf "FATAL: failed to unmap grant references (frontend will be confused (%s)\n%!" (Printexc.to_string e) in
+        Log.err (fun f -> f "FATAL: failed to unmap grant references (frontend will be confused (%s)" (Printexc.to_string e)) in
 
     (* Dequeue all requests on the ring. *)
     let q = ref [] in
@@ -184,14 +191,14 @@ let service_thread t stats =
         let segs = Blkproto.Req.get_segments page req.Req.nr_segs in
         { req with Req.segs = Req.Direct segs }
       | Req.Indirect _ ->
-        printf "FATAL: unimplemented: more than 1 indirect descriptor page\n%!";
+        Log.err (fun f -> f "FATAL: unimplemented: more than 1 indirect descriptor page");
         failwith "unimplemented: more than 1 indirect descriptor page"
     ) !q in
 
     let writable_q, readonly_q = List.partition is_writable q in
     let grants_of_req req = match req.Req.segs with
       | Req.Indirect _ ->
-        printf "FATAL: grants_of_req encountered Indirect\n%!";
+        Log.err (fun f -> f "FATAL: grants_of_req encountered Indirect");
         assert false (* replaced above *)
       | Req.Direct segs -> grants_of_segments (Array.to_list segs) in
     let writable_grants = List.concat (List.map grants_of_req writable_q) in
@@ -210,12 +217,12 @@ let service_thread t stats =
       let requests = List.fold_left (fun acc request ->
         let segs = match request.Req.segs with
          | Req.Indirect _ ->
-           printf "FATAL: some Indirect descriptors were not dereferenced\n%!";
+           Log.err (fun f -> f "FATAL: some Indirect descriptors were not dereferenced");
            assert false (* replaced above *)
          | Req.Direct segs -> Array.to_list segs in
         match request.Req.op with
         | None ->
-          printf "FATAL: Unknown blkif request type\n%!";
+          Log.err (fun f -> f "FATAL: Unknown blkif request type");
           failwith "unknown blkif request type";
         | Some ((Req.Read | Req.Write) as op) ->
           (try
@@ -225,11 +232,11 @@ let service_thread t stats =
               frag) segs in
             add acc request.Req.id op request.Req.sector bufs
           with e ->
-            printf "FATAL: failed to analyse request (%s)\n%!" (Printexc.to_string e);
+            Log.err (fun f -> f "FATAL: failed to analyse request (%s)" (Printexc.to_string e));
             acc (* drop request on the floor, but frontend will be confused *)
           )
         | Some op ->
-          printf "FATAL: Unhandled request type %s\n%!" (Req.string_of_op op);
+          Log.err (fun f -> f "FATAL: Unhandled request type %s" (Req.string_of_op op));
           failwith "unhandled request type";
         ) empty q in
       let open Lwt.Infix in
@@ -303,7 +310,7 @@ let init xg xe domid ring_info ops =
     on_cancel th (fun () ->
       let counter = ref 0 in
       Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
-      if !counter <> 0 then printf "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?\n%!" !(counter);
+      if !counter <> 0 then Log.err (fun f-> f "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?" !(counter));
       let () = Gnttab.unmap_exn xg mapping in ()
     );
     th, stats
@@ -446,7 +453,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     let ring_info = match Blkproto.RingInfo.of_assoc_list frontend with
       | `OK x -> x
       | `Error x -> failwith x in
-    printf "%s\n%!" (Blkproto.RingInfo.to_string ring_info);
+    Log.info (fun f-> f "%s" (Blkproto.RingInfo.to_string ring_info));
     let device_read ofs bufs =
       Lwt.catch
         (fun () ->
@@ -455,7 +462,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
           >>= fun () ->
           return ()
         ) (fun e ->
-          printf "blkback: read exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+          Log.err (fun f -> f "blkback: read exception: %s, offset=%Ld" (Printexc.to_string e) ofs);
           Lwt.fail e) in
     let device_write ofs bufs =
       Lwt.catch
@@ -465,7 +472,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
           >>= fun () ->
           return ()
         ) (fun e ->
-          printf "blkback: write exception: %s, offset=%Ld\n%!" (Printexc.to_string e) ofs;
+          Log.err (fun f -> f "blkback: write exception: %s, offset=%Ld" (Printexc.to_string e) ofs);
           Lwt.fail e) in
     let be_thread, stats = init xg xe domid ring_info {
       read = device_read;
@@ -490,7 +497,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     Lwt.cancel be_thread;
     Lwt.return stats
   )(fun e ->
-    printf "blkback caught %s\n%!" (Printexc.to_string e);
+    Log.err (fun f -> f "blkback caught %s" (Printexc.to_string e));
     B.disconnect t
     >>= fun () ->
     fail e)
