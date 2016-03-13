@@ -468,7 +468,7 @@ let rec multiple_requests_into op t start_sector = function
     let start_sector = Int64.(add start_sector (of_int (max_segments_per_request * 4096 / t.t.info.sector_size))) in
     multiple_requests_into op t start_sector remaining
 
-let connect id =
+let connect_already_locked id =
   let open Lwt.Infix in
   if Hashtbl.mem devices id then begin
     Hashtbl.find devices id
@@ -539,6 +539,17 @@ let connect id =
                         (Printf.sprintf "device %s not found (available = [ %s ])"
                            id (String.concat ", " all))))
   end
+
+let connect_m = Lwt_mutex.create ()
+
+(* For safety only allow one connect at a time, in case two threads attempt
+   to connect the same device at the same time and both end up doing it.
+   See #31 *)
+let connect id =
+  Lwt_mutex.with_lock connect_m
+    (fun () ->
+      connect_already_locked id
+    )
 
 let id t = string_of_int t.vdev
 
