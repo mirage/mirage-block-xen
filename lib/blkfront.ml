@@ -21,6 +21,13 @@ open Blkproto
 open Gnt
 open OS
 
+let src =
+  let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront" in
+  Logs.Src.set_level src (Some Logs.Info);
+  src
+
+module Log = (val Logs.src_log src : Logs.LOG)
+
 type 'a io = 'a Lwt.t
 
 type page_aligned_buffer = Cstruct.t
@@ -70,7 +77,7 @@ let alloc ~order (num,domid) =
     (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
-  printf "Blkfront %s\n%!" (Ring.Rpc.to_summary_string sring);
+  Log.info (fun f -> f "Blkfront.alloc %s" (Ring.Rpc.to_summary_string sring));
   let fring = Ring.Rpc.Front.init ~sring in
   let client = Lwt_ring.Front.init Int64.to_string fring in
   return (gnts, fring, client)
@@ -92,7 +99,7 @@ let plug (id:id) =
   ( try return (int_of_string id)
     with _ -> fail (Failure "invalid vdev") )
   >>= fun vdev ->
-  printf "Blkfront.create; vdev=%d\n%!" vdev;
+  Log.info (fun f -> f "Blkfront.plug id=%s" id);
   let node = sprintf "device/vbd/%d/%s" vdev in
 
   Xs.make ()
@@ -119,15 +126,15 @@ let plug (id:id) =
   backend_read int_of_string 0 "max-ring-page-order"
   >>= fun backend_max_ring_page_order ->
   if backend_max_ring_page_order = 0
-  then printf "Blkback can only use a single-page ring\n%!"
-  else printf "Blkback advertises multi-page ring (size 2 ** %d pages)\n%!" backend_max_ring_page_order;
+  then Log.info (fun f -> f "Blkback can only use a single-page ring")
+  else Log.info (fun f -> f "Blkback advertises multi-page ring (size 2 ** %d pages)" backend_max_ring_page_order);
 
   let our_max_ring_page_order = 2 in (* 4 pages *)
   let ring_page_order = min our_max_ring_page_order backend_max_ring_page_order in
-  printf "Negotiated a %s\n%!"
+  Log.info (fun f -> f "Negotiated a %s"
     (if ring_page_order = 0 then
        "single-page ring" else
-       sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order);
+       sprintf "multi-page ring (size 2 ** %d pages)" ring_page_order));
 
   alloc ~order:ring_page_order (vdev,backend_id)
   >>= fun (gnts, ring, client) ->
@@ -163,7 +170,7 @@ let plug (id:id) =
   let max_indirect_segments = min max_indirect_segments Req.Proto_64.segments_per_indirect_page in
   ( backend_read (Device_state.of_string) Device_state.Unknown "state"
     >>= fun state ->
-    printf "state=%s\n%!" (Device_state.prettyprint state);
+    Log.debug (fun f -> f "state=%s" (Device_state.prettyprint state));
     backend_read Int64.of_string (-1L) "sectors"
     >>= fun size_sectors ->
     backend_read int_of_string 0 "sector-size"
@@ -173,8 +180,8 @@ let plug (id:id) =
     return { sector_size; size_sectors; read_write } )
   >>= fun info ->
 
-  printf "Blkfront info: sector_size=%u sectors=%Lu max_indirect_segments=%d\n%!"
-    info.sector_size info.size_sectors max_indirect_segments;
+  Log.info (fun f -> f "Blkfront info: sector_size=%u sectors=%Lu max_indirect_segments=%d"
+    info.sector_size info.size_sectors max_indirect_segments);
   Eventchn.unmask h evtchn;
   let t = { backend_id; backend; ring; client; gnts; evtchn; max_indirect_segments; info } in
   (* Start the background poll thread *)
@@ -184,7 +191,7 @@ let plug (id:id) =
 (* Unplug shouldn't block, although the Xen one might need to due
    to Xenstore? XXX *)
 let unplug id =
-  printf "Blkif.unplug %s: not implemented yet\n" id
+  Log.err (fun f -> f "Blkfront.unplug %s: not implemented yet" id)
 
 (** Return a list of valid VBDs *)
 let enumerate () =
@@ -198,7 +205,7 @@ let enumerate () =
     | Xs_protocol.Enoent _ ->
       return []
     | e ->
-      printf "Blkif.enumerate caught exception: %s\n" (Printexc.to_string e);
+      Log.err (fun f -> f "Blkfront.enumerate caught exception: %s" (Printexc.to_string e));
       return []
     )
 
@@ -218,10 +225,10 @@ let params_to_frontend_ids ids =
         return ((params, id) :: list)
       ) (function
         | Xs_protocol.Enoent path ->
-          printf "Blkif.params_to_frontend_ids: missing %s\n" path;
+          Log.warn (fun f -> f "Blkfront.params_to_frontend_ids: missing %s" path);
           return list
         | e ->
-          printf "Blkif.params_to_frontend_ids caught exception: %s\n" (Printexc.to_string e);
+          Log.warn (fun f -> f "Blkfront.params_to_frontend_ids caught exception: %s" (Printexc.to_string e));
           return list
         )
     ) [] ids
@@ -410,7 +417,7 @@ let resume () =
   ) devs
 
 let disconnect _id =
-  printf "Blkfront: disconnect not implement yet\n";
+  Log.err (fun f -> f "Blkfront: disconnect not implement yet");
   return ()
 
 type error =
@@ -479,7 +486,7 @@ let connect id =
     *)
     let choice =
       if List.mem id all then begin
-        printf "Block.connect %s: interpreting %s as a xen virtual disk bus slot number\n" id id;
+        Log.info (fun f -> f "Blkfront.connect %s: interpreting %s as a xen virtual disk bus slot number" id id);
         Some id
       end else begin
         let id' =
@@ -493,18 +500,18 @@ let connect id =
             string_of_int (Device_number.to_xenstore_key device)
           with _ -> id in
         if List.mem id' all then begin
-          printf "Block.connect %s: interpreting %s as a linux device string, translating to %s\n" id id id';
+          Log.info (fun f -> f "Blkfront.connect %s: interpreting %s as a linux device string, translating to %s" id id id');
           Some id'
         end else begin
           match List.map snd (List.filter (fun (params, _) -> params = id) list), all with
           | [ id' ], _ ->
-            printf "Block.connect %s: interpreting %s as a backend params key, translating to %s\n" id id id';
+            Log.info (fun f -> f "Blkfront.connect %s: interpreting %s as a backend params key, translating to %s" id id id');
             Some id'
           | first :: rest, _ ->
-            printf "Block.connect %s: name is ambiguous: it matches multiple backend params keys [ %s ]" id (String.concat "; " (first::rest));
+            Log.err (fun f -> f "Blkfront.connect %s: name is ambiguous: it matches multiple backend params keys [ %s ]" id (String.concat "; " (first::rest)));
             None
           | _, _ ->
-            printf "Block.connect %s: unable to match '%s' to any available devices [ %s ]\n" id id (String.concat "; " all);
+            Log.err (fun f -> f "Blkfront.connect %s: unable to match '%s' to any available devices [ %s ]\n" id id (String.concat "; " all));
             None
         end
       end in
@@ -515,7 +522,7 @@ let connect id =
       t >>= fun d ->
       return (`Ok d)
     | Some id' ->
-      printf "Block.connect %s -> %s\n%!" id id';
+      Log.info (fun f -> f "Blkfront.connect %s -> %s" id id');
       let t, u = Lwt.task () in
       Hashtbl.replace devices id' t;
       Hashtbl.replace devices id t;
@@ -527,7 +534,7 @@ let connect id =
       Lwt.wakeup u dev;
       return (`Ok dev)
     | None ->
-      printf "Block.connect %s: could not find device\n" id;
+      Log.err (fun f -> f "Blkfront.connect %s: could not find device" id);
       return (`Error (`Unknown
                         (Printf.sprintf "device %s not found (available = [ %s ])"
                            id (String.concat ", " all))))
@@ -567,5 +574,5 @@ let write t start_sector pages =
     ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
 
 let _ =
-  printf "Blkif: add resume hook\n%!";
+  Log.debug (fun f -> f "Blkfront: add resume hook");
   Sched.add_resume_hook resume
