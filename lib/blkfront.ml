@@ -209,6 +209,20 @@ let enumerate () =
       return []
     )
 
+let deprecated_prefixes = [ "tapdisk"; "tap2"; "aio"; "ioemu"; "file"; "phy" ]
+
+let strip_prefixes x =
+  Stringext.split x ~on:':'
+  |> List.fold_left (fun acc x -> match acc with
+      | [] ->
+        if List.mem x deprecated_prefixes
+        then []
+        else [ x ]
+      | xs -> x :: xs
+    ) []
+  |> List.rev
+  |> String.concat ":"
+
 (** Return a list of pairs [backend-params-key, frontend-id].
     This is only intended to be a heuristic for 'connect' below. *)
 let params_to_frontend_ids ids =
@@ -222,7 +236,9 @@ let params_to_frontend_ids ids =
         >>= fun backend ->
         Xs.(immediate xs (fun h -> read h (Printf.sprintf "%s/params" backend)))
         >>= fun params ->
-        return ((params, id) :: list)
+        (* According to http://xenbits.xen.org/docs/4.6-testing/misc/xl-disk-configuration.txt
+           the params keys can have deprecated prefixes which should be stripped and ignored. *)
+        return ((strip_prefixes params, id) :: list)
       ) (function
         | Xs_protocol.Enoent path ->
           Log.warn (fun f -> f "Blkfront.params_to_frontend_ids: missing %s" path);
