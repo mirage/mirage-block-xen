@@ -121,7 +121,7 @@ let is_writable req = match req.Req.op with
   Log.err (fun f -> f "FATAL: unhandled request type %s" (Req.string_of_op op));
   failwith "unhandled request type"
 
-module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK with type id := string) = struct
+module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK) = struct
 let service_thread t stats =
 
   let grants_of_segments = List.map (fun seg -> {
