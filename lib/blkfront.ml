@@ -488,8 +488,6 @@ let connect_already_locked id =
   let open Lwt.Infix in
   if Hashtbl.mem devices id then begin
     Hashtbl.find devices id
-    >>= fun d ->
-    return (`Ok d)
   end else begin
     enumerate ()
     >>= fun all ->
@@ -535,8 +533,7 @@ let connect_already_locked id =
     | Some id' when Hashtbl.mem devices id' ->
       let t = Hashtbl.find devices id' in
       Hashtbl.replace devices id t;
-      t >>= fun d ->
-      return (`Ok d)
+      t
     | Some id' ->
       Log.info (fun f -> f "Blkfront.connect %s -> %s" id id');
       let t, u = Lwt.task () in
@@ -545,15 +542,13 @@ let connect_already_locked id =
       (* id' is now in devices, so no-one will call plug in parallel with us *)
       plug id'
       >>= fun trans ->
-      let dev = { vdev = int_of_string id';
-                  t = trans } in
+      let dev = { vdev = int_of_string id'; t = trans } in
       Lwt.wakeup u dev;
-      return (`Ok dev)
+      return dev
     | None ->
       Log.err (fun f -> f "Blkfront.connect %s: could not find device" id);
-      return (`Error (`Unknown
-                        (Printf.sprintf "device %s not found (available = [ %s ])"
-                           id (String.concat ", " all))))
+      fail_with (Printf.sprintf "device %s not found (available = [ %s ])"
+                   id (String.concat ", " all))
   end
 
 let connect_m = Lwt_mutex.create ()
