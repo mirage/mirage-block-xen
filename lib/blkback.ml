@@ -102,13 +102,8 @@ end
 
 module BlockError = struct
   open Lwt
-  let (>>=) x f = x >>= function
-  | `Ok x -> f x
-  | `Error (`Unknown x) -> fail (Failure x)
-  | `Error `Unimplemented -> fail (Failure "unimplemented in block device")
-  | `Error `Is_read_only -> fail (Failure "block device is read-only")
-  | `Error `Disconnected -> fail (Failure "block device is disconnected")
-  | `Error _ -> fail (Failure "unknown block device failure")
+  let fail_read e  = fail @@ Failure (Format.asprintf "%a" Mirage_pp.pp_block_error e)
+  let fail_write e = fail @@ Failure (Format.asprintf "%a" Mirage_pp.pp_block_write_error e)
 end
 
 let is_writable req = match req.Req.op with
@@ -458,9 +453,9 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
       Lwt.catch
         (fun () ->
           let open BlockError in
-          B.read t ofs bufs
-          >>= fun () ->
-          return ()
+          B.read t ofs bufs >>= function
+          | Error e -> fail_read e
+          | Ok () -> return ()
         ) (fun e ->
           Log.err (fun f -> f "blkback: read exception: %s, offset=%Ld" (Printexc.to_string e) ofs);
           Lwt.fail e) in
@@ -468,9 +463,9 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
       Lwt.catch
         (fun () ->
           let open BlockError in
-          B.write t ofs bufs
-          >>= fun () ->
-          return ()
+          B.write t ofs bufs >>= function
+          | Error e -> fail_write e
+          | Ok () -> return ()
         ) (fun e ->
           Log.err (fun f -> f "blkback: write exception: %s, offset=%Ld" (Printexc.to_string e) ofs);
           Lwt.fail e) in
