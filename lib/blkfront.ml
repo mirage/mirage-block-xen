@@ -436,11 +436,7 @@ let disconnect _id =
   Log.err (fun f -> f "Blkfront: disconnect not implement yet");
   return ()
 
-type error =
-  [ `Disconnected
-  | `Is_read_only
-  | `Unimplemented
-  | `Unknown of string ]
+type error = V1.Block.error
 
 (* [take xs n] returns [(taken, remaining)] where [taken] is as many
    elements of [xs] as possible, up to [n], and [remaining] is any
@@ -581,8 +577,8 @@ let read t start_sector pages =
     (fun () ->
       multiple_requests_into Req.Read t (sector t start_sector) pages
       >>= fun () ->
-      return (`Ok ())
-    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
+      return (Ok ())
+    ) (fun e -> return (Error (`Msg (Printexc.to_string e))))
 
 let write t start_sector pages =
   let open Lwt.Infix in
@@ -592,8 +588,8 @@ let write t start_sector pages =
     (fun () ->
       multiple_requests_into Req.Write t (sector t start_sector) pages
       >>= fun () ->
-      return (`Ok ())
-    ) (fun e -> return (`Error (`Unknown (Printexc.to_string e))))
+      return (Ok ())
+    ) (fun e -> return (Error (`Msg (Printexc.to_string e))))
 
 let _ =
   Log.debug (fun f -> f "Blkfront: add resume hook");
