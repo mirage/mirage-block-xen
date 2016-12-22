@@ -17,6 +17,7 @@
 
 open Lwt
 open Printf
+open Mirage_block
 open Blkproto
 open Gnt
 open OS
@@ -31,12 +32,6 @@ module Log = (val Logs.src_log src : Logs.LOG)
 type 'a io = 'a Lwt.t
 
 type page_aligned_buffer = Cstruct.t
-
-type info = {
-  read_write: bool;
-  sector_size: int;
-  size_sectors: int64;
-}
 
 type transport = {
   backend_id: int;
@@ -436,7 +431,17 @@ let disconnect _id =
   Log.err (fun f -> f "Blkfront: disconnect not implement yet");
   return ()
 
-type error = V1.Block.error
+type error = [ Mirage_block.error | `Exn of exn ]
+
+let pp_error ppf = function
+  | #Mirage_block.error as e -> Mirage_block.pp_error ppf e
+  | `Exn e -> Fmt.exn ppf e
+
+type write_error = [ Mirage_block.write_error | `Exn of exn ]
+
+let pp_write_error ppf = function
+  | #Mirage_block.write_error as e -> Mirage_block.pp_write_error ppf e
+  | `Exn e -> Fmt.exn ppf e
 
 (* [take xs n] returns [(taken, remaining)] where [taken] is as many
    elements of [xs] as possible, up to [n], and [remaining] is any
@@ -578,7 +583,7 @@ let read t start_sector pages =
       multiple_requests_into Req.Read t (sector t start_sector) pages
       >>= fun () ->
       return (Ok ())
-    ) (fun e -> return (Error (`Msg (Printexc.to_string e))))
+    ) (fun e -> return (Error (`Exn e)))
 
 let write t start_sector pages =
   let open Lwt.Infix in
@@ -589,7 +594,7 @@ let write t start_sector pages =
       multiple_requests_into Req.Write t (sector t start_sector) pages
       >>= fun () ->
       return (Ok ())
-    ) (fun e -> return (Error (`Msg (Printexc.to_string e))))
+    ) (fun e -> return (Error (`Exn e)))
 
 let _ =
   Log.debug (fun f -> f "Blkfront: add resume hook");
