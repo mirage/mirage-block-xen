@@ -100,12 +100,6 @@ module Request = struct
 
 end
 
-module BlockError = struct
-  open Lwt
-  let fail_read e  = fail @@ Failure (Format.asprintf "%a" Mirage_pp.pp_block_error e)
-  let fail_write e = fail @@ Failure (Format.asprintf "%a" Mirage_pp.pp_block_write_error e)
-end
-
 let is_writable req = match req.Req.op with
 | Some Req.Read -> true (* we need to write into the page *)
 | Some Req.Write -> false (* we read from the guest and write to the backend *)
@@ -116,7 +110,14 @@ let is_writable req = match req.Req.op with
   Log.err (fun f -> f "FATAL: unhandled request type %s" (Req.string_of_op op));
   failwith "unhandled request type"
 
-module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: V1_LWT.BLOCK) = struct
+module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: Mirage_block_lwt.S) = struct
+
+module BlockError = struct
+  open Lwt
+  let fail_read e  = Fmt.kstrf fail_with "%a" B.pp_error e
+  let fail_write e = Fmt.kstrf fail_with "%a" B.pp_write_error e
+end
+
 let service_thread t stats =
 
   let grants_of_segments = List.map (fun seg -> {
@@ -393,6 +394,7 @@ let force_close (domid, device) =
 
 let run ?(max_indirect_segments=256) t name (domid,devid) =
   let open Lwt.Infix in
+  let open Mirage_block in
   make ()
   >>= fun client ->
   let xg = Gnttab.interface_open () in
@@ -413,8 +415,8 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
 
     (* Write the disk information for the frontend *)
     let di = Blkproto.DiskInfo.(to_assoc_list {
-      sector_size = info.B.sector_size;
-      sectors = info.B.size_sectors;
+      sector_size = info.sector_size;
+      sectors = info.size_sectors;
       media = Media.Disk;
       mode = Mode.ReadWrite }) in
     (* Advertise indirect descriptors with the same default as Linux blkback *)
