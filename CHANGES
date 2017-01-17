@@ -1,3 +1,8 @@
+1.5.0 (unreleased)
+* Build with MirageOS 3, and don't build against earlier versions
+* support and test compiler versions 4.03 and 4.04
+* remove unused `id` type
+
 1.4.0 (13-Mar-2016)
 * Remove dependency on camlp4; use ppx instead
 * opam: now pass lint check
