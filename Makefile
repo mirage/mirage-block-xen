@@ -1,51 +1,23 @@
-.PHONY: all clean install build
-all: build doc
 
-NAME=mirage-block-xen
-IMAGE=$(NAME)
-J=4
+.PHONY: build clean test
 
-include config.mk
-config.mk: configure
-	./configure
+build:
+	jbuilder build @install --dev
 
-configure: configure.ml
-	ocamlfind ocamlopt -package "cmdliner,findlib" -linkpkg $< -o $@
+test:
+	jbuilder runtest --dev
 
-export OCAMLRUNPARAM=b
-
-setup.bin: setup.ml
-	@ocamlopt.opt -o $@ $< || ocamlopt -o $@ $< || ocamlc -o $@ $<
-	@rm -f setup.cmx setup.cmi setup.o setup.cmo
-
-setup.data: setup.bin
-	@./setup.bin -configure $(ENABLE_BLKFRONT) $(ENABLE_BLKBACK)
-
-build: setup.data setup.bin
-	@./setup.bin -build -j $(J)
-
-doc: setup.data setup.bin
-	@./setup.bin -doc -j $(J)
-
-install: setup.bin
-	@./setup.bin -install
+install:
+	jbuilder install
 
 uninstall:
-	@ocamlfind remove $(NAME) || true
-
-test: setup.bin build
-	@./setup.bin -test
-
-reinstall: setup.bin
-	@ocamlfind remove $(NAME) || true
-	@./setup.bin -reinstall
+	jbuilder uninstall
 
 xen-depends: Dockerfile build.sh
-	docker build -t $(IMAGE) .
+	docker build -t mirage-block-xen .
 
 xen-build: xen-depends clean
-	docker run -v $(shell pwd):/src $(IMAGE) /build.sh
+	docker run -v $(shell pwd):/src mirage-block-xen /build.sh
 
 clean:
-	@ocamlbuild -clean
-	@rm -f setup.data setup.log setup.bin
+	rm -rf _build
