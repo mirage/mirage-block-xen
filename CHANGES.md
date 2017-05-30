@@ -1,4 +1,4 @@
-## 1.5.0 (unreleased)
+## 1.5.0 (2017-01-24)
 * Build with MirageOS 3, and don't build against earlier versions
 * support and test compiler versions 4.03 and 4.04
 * remove unused `id` type
