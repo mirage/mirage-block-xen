@@ -3,6 +3,8 @@ maintainer:   "dave@recoil.org"
 homepage:     "https://github.com/mirage/mirage-block-xen"
 dev-repo:     "https://github.com/mirage/mirage-block-xen.git"
 bug-reports:  "https://github.com/mirage/mirage-block-xen/issues"
+doc:          "https://mirage.github.io/mirage-block-xen"
+
 authors: [
   "Anil Madhavapeddy"
   "David Scott"
