@@ -49,7 +49,6 @@ type t = {
   mutable t: transport
 }
 
-type id = string
 exception IO_error of string
 
 (** slot number (e.g. "51712") to device threads *)
