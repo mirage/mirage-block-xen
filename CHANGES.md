@@ -1,3 +1,7 @@
+## 1.5.2 (2017-06-11):
+
+* Add missing dependency on xenstore.client
+
 ## 1.5.1 (2017-05-30):
 * Switch to jbuilder and topkg
 * Update to shared-memory-ring-lwt
