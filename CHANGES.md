@@ -1,3 +1,6 @@
+## 1.5.3 (2016-06-16):
+* Add missing dependency on io-page-xen
+
 ## 1.5.2 (2017-06-11):
 
 * Add missing dependency on xenstore.client
