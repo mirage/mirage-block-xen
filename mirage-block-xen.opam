@@ -33,7 +33,7 @@ depends: [
   "shared-memory-ring-lwt"
   "mirage-block-lwt" {>= "1.0.0"}
   "ipaddr"
-  "io-page" {>= "1.4.0"}
+  "io-page-xen" {>= "2.0.0"}
   "mirage-xen" {>= "1.0.1" }
   "rresult"
 ]
