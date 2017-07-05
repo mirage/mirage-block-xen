@@ -1,4 +1,8 @@
-## 1.5.3 (2016-06-16):
+## 1.5.4 (2017-07-05):
+* Use `ppx_cstruct` directly instead of the `cstruct.ppx` compat
+  package, which makes it easier for jbuilder subdirectory embedding.
+
+## 1.5.3 (2017-06-16):
 * Add missing dependency on io-page-xen
 
 ## 1.5.2 (2017-06-11):
