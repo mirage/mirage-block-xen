@@ -20,7 +20,7 @@ open Printf
 open Mirage_block
 open Blkproto
 open Gnt
-open OS
+open Mirage_xenstore_transport
 
 let src =
   let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront" in

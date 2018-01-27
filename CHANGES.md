@@ -1,3 +1,7 @@
+##
+* Remove usage of the OS module and directly depend on the Xenstore
+  code.
+
 ## 1.5.4 (2017-07-05):
 * Use `ppx_cstruct` directly instead of the `cstruct.ppx` compat
   package, which makes it easier for jbuilder subdirectory embedding.

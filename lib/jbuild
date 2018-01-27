@@ -11,7 +11,7 @@
  ((name mirage_block_xen_front)
   (public_name mirage-block-xen.front)
   (modules (Blkfront Block))
-  (libraries (logs stringext lwt cstruct ppx_cstruct mirage-block-lwt io-page io-page-xen shared-memory-ring shared-memory-ring-lwt mirage-block-xen xen-evtchn xen-gnt mirage-xen))
+  (libraries (logs stringext lwt cstruct ppx_cstruct mirage-block-lwt io-page io-page-xen shared-memory-ring shared-memory-ring-lwt mirage-block-xen xen-evtchn xen-gnt mirage-xenstore-transport))
   (wrapped false)
 ))
 
@@ -22,3 +22,8 @@
   (libraries (logs lwt cstruct ppx_cstruct io-page shared-memory-ring shared-memory-ring-lwt mirage-block-xen xen-evtchn xen-gnt xenstore xenstore.client mirage-block-lwt rresult))
   (wrapped false)
 ))
+
+(alias
+  ((name mirage-xen)
+   (deps (mirage_block_xen.cmxa mirage_block_xen_back.cmxa mirage_block_xen_front.cmxa))
+   ))
