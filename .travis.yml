@@ -1,12 +1,15 @@
 language: c
-sudo: false
+install: wget https://raw.githubusercontent.com/ocaml/ocaml-ci-scripts/master/.travis-docker.sh
+script: bash -ex .travis-docker.sh
 services:
-  - docker
-install: wget https://raw.githubusercontent.com/ocaml/ocaml-travisci-skeleton/master/.travis-docker.sh
-script: bash -ex ./.travis-docker.sh
+- docker
 env:
   global:
-  - PACKAGE="mirage-block-xen"
+  - PINS="mirage-block-xen:."
+  - DISTRO="debian-stable"
   matrix:
-  - DISTRO="ubuntu-16.04" OCAML_VERSION="4.03.0"
-  - DISTRO="alpine" OCAML_VERSION="4.04.2"
+  - PACKAGE="mirage-block-xen" OCAML_VERSION="4.02.3"
+  - PACKAGE="mirage-block-xen" OCAML_VERSION="4.03.0"
+  - PACKAGE="mirage-block-xen" OCAML_VERSION="4.04.2"
+  - PACKAGE="mirage-block-xen" OCAML_VERSION="4.05.0"
+  - PACKAGE="mirage-block-xen" OCAML_VERSION="4.06.0"
