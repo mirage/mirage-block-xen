@@ -1,3 +1,6 @@
+## 1.6.0 (2019-01-11):
+* Port to dune from jbuilder (@avsm)
+
 ## 1.5.4 (2017-07-05):
 * Use `ppx_cstruct` directly instead of the `cstruct.ppx` compat
   package, which makes it easier for jbuilder subdirectory embedding.

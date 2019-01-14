@@ -8,5 +8,8 @@ env:
   global:
   - PACKAGE="mirage-block-xen"
   matrix:
-  - DISTRO="ubuntu-16.04" OCAML_VERSION="4.03.0"
-  - DISTRO="alpine" OCAML_VERSION="4.04.2"
+  - DISTRO="ubuntu" OCAML_VERSION="4.03"
+  - DISTRO="alpine" OCAML_VERSION="4.04"
+  - DISTRO="alpine" OCAML_VERSION="4.05"
+  - DISTRO="alpine" OCAML_VERSION="4.06"
+  - DISTRO="alpine" OCAML_VERSION="4.07"
