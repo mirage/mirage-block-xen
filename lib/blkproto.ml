@@ -15,7 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-open Printf
+[@@@warning "-32"]
 
 type ('a, 'b) result = [
   | `OK of 'a
