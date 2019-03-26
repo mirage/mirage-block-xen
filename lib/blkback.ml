@@ -82,8 +82,6 @@ module Opt = struct
     | Some x -> x
 end
 
-let empty = Cstruct.create 0
-
 module Request = struct
   type kind = Read | Write
 
