@@ -70,15 +70,9 @@ type ('a, 'b) t = {
 let page_size = 4096
 
 module Opt = struct
-  let map f = function
-    | None -> None
-    | Some x -> Some (f x)
   let iter f = function
     | None -> ()
     | Some x -> f x
-  let default d = function
-    | None -> d
-    | Some x -> x
 end
 
 module Request = struct
@@ -145,7 +139,7 @@ let service_thread t stats =
             Log.err (fun f -> f "FATAL: failed to map batch of %d grant references: %s" (List.length grants) s);
             failwith "Failed to map grants" (* TODO: handle this error cleanly *)
           | Ok x ->
-            let buf = Io_page.to_cstruct (OS.Xen.Import.Local_mapping.to_buf x) in
+            let buf = Io_page.to_cstruct @@ OS.Xen.Import.Local_mapping.to_buf x in
             let () =
               List.iteri (fun i import ->
                   let region = Cstruct.sub buf (4096 * i) 4096 in
