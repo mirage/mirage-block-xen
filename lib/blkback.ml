@@ -142,7 +142,7 @@ let service_thread t stats =
             let buf = Io_page.to_cstruct @@ OS.Xen.Import.Local_mapping.to_buf x in
             let () =
               List.iteri (fun i import ->
-                  let region = Cstruct.sub buf (4096 * i) 4096 in
+                  let region = Cstruct.sub buf (page_size * i) page_size in
                   Hashtbl.add grant_table import.OS.Xen.Import.ref region
                ) grants
             in
