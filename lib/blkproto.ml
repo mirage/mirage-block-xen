@@ -33,7 +33,7 @@ module Mode = struct
   let to_string = function
     | ReadOnly -> "r"
     | ReadWrite -> "w"
-  let of_string = function
+  let _of_string = function
     | "r" -> Some ReadOnly
     | "w" -> Some ReadWrite
     | _ -> None
@@ -48,7 +48,7 @@ module Media = struct
   let to_string = function
     | CDROM -> "cdrom"
     | Disk -> "disk"
-  let of_string = function
+  let _of_string = function
     | "cdrom" -> Some CDROM
     | "disk" -> Some Disk
     | _ -> None
@@ -78,8 +78,8 @@ module State = struct
     else Error (`Msg (Printf.sprintf "unknown device state: %d" x))
 
   let _state = "state"
-  let keys = [ _state ]
-  let of_assoc_list l =
+  let _keys = [ _state ]
+  let _of_assoc_list l =
     list l _state >>= fun x ->
     int x >>= fun x ->
     of_int x
@@ -153,7 +153,7 @@ module FeatureIndirect = struct
     then [] (* don't advertise the feature *)
     else [ _max_indirect_segments, string_of_int t.max_indirect_segments ]
 
-  let of_assoc_list l =
+  let _of_assoc_list l =
     if not(List.mem_assoc _max_indirect_segments l)
     then Ok { max_indirect_segments = 0 }
     else
@@ -180,7 +180,7 @@ module DiskInfo = struct
     _info, string_of_int (Media.to_int t.media lor (Mode.to_int t.mode));
   ]
 
-  let of_assoc_list l =
+  let _of_assoc_list l =
     list l _sector_size >>= fun x -> int x
     >>= fun sector_size ->
     list l _sectors >>= fun x -> int64 x
@@ -213,7 +213,7 @@ module RingInfo = struct
     _protocol;
   ]
 
-  let to_assoc_list t = [
+  let _to_assoc_list t = [
     _ring_ref, Int32.to_string t.ref;
     _event_channel, string_of_int t.event_channel;
     _protocol, Protocol.to_string t.protocol
@@ -256,6 +256,7 @@ module Req = struct
   | Flush -> "Flush" | Op_reserved_1 -> "Op_reserved_1" | Trim -> "Trim"
   | Indirect_op -> "Indirect_op"
 
+  [@@@warning "-38"]
   exception Unknown_request_type of int
 
   (* Defined in include/xen/io/blkif.h BLKIF_MAX_SEGMENTS_PER_REQUEST *)
@@ -288,7 +289,7 @@ module Req = struct
     segs: segs;
   }
 
-  let string_of t =
+  let _string_of t =
     Printf.sprintf "{ op=%s handle=%d id=%Ld sector=%Ld segs=%s (total %d) }"
     (match t.op with Some x -> string_of_op x | None -> "None")
       t.handle t.id t.sector (string_of_segs t.segs) t.nr_segs
@@ -335,8 +336,14 @@ module Req = struct
     val get_hdr_indirect_op: Cstruct.t -> int
     val set_hdr_indirect_op: Cstruct.t -> int -> unit
   end
-
-  module Marshalling(D: DIRECT)(I: INDIRECT) = struct
+  module type PROTOCOL_IMPLEMENTATION = sig 
+    val total_size : int 
+    val segments_per_indirect_page : int 
+    val write_segments : seg array -> Cstruct.t -> unit
+    val write_request : t -> Cstruct.t -> int64
+    val read_request : Cstruct.t -> t
+  end
+  module Marshalling(D: DIRECT)(I: INDIRECT) : PROTOCOL_IMPLEMENTATION = struct
     (* total size of a request structure, in bytes *)
     let total_size = D.sizeof_hdr + (sizeof_segment * segments_per_request)
 
