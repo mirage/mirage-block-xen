@@ -115,7 +115,7 @@ let plug (id:id) =
         Xs.(immediate xs (fun h -> read h (backend k)))
         >>= fun s ->
         return (fn s)
-      ) (fun exn -> return default) in
+      ) (fun _exn -> return default) in
 
   (* The backend can advertise a multi-page ring: *)
   backend_read int_of_string 0 "max-ring-page-order"
@@ -182,11 +182,6 @@ let plug (id:id) =
   (* Start the background poll thread *)
   let _ = poll t in
   return t
-
-(* Unplug shouldn't block, although the Xen one might need to due
-   to Xenstore? XXX *)
-let unplug id =
-  Log.err (fun f -> f "Blkfront.unplug %s: not implemented yet" id)
 
 (** Return a list of valid VBDs *)
 let enumerate () =
@@ -312,103 +307,6 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
       | exn -> fail exn) in
   retry ()
 
-(* THIS FUNCTION IS DEPRECATED. Use 'write' instead.
-
-   Write a single page to disk.
-   Offset is in bytes, which must be sector-aligned
-   Page must be an Io_page *)
-let rec write_page t offset page =
-  let sector = Int64.(div offset (of_int t.t.info.sector_size)) in
-  if not t.t.info.read_write
-  then fail (IO_error "read-only")
-  else single_request_into Req.Write t sector [ page ]
-
-
-(* THIS FUNCTION IS DEPRECATED. Use 'read' instead.
-
-   Reads [num_sectors] starting at [sector], returning a stream of Io_page.ts *)
-let read_512 t sector num_sectors =
-  let module Single_request = struct
-    (** A large request must be broken down into a series of smaller page-aligned requests: *)
-    type t = {
-      start_sector: int64; (* page-aligned sector to start reading from *)
-      start_offset: int;   (* sector offset into the page of our data *)
-      end_sector: int64;   (* last page-aligned sector to read *)
-      end_offset: int;     (* sector offset into the page of our data *)
-    }
-
-    (** Number of pages required to issue this request *)
-    let npages_of t = Int64.(to_int (div (sub t.end_sector t.start_sector) 8L))
-
-    let to_string t =
-      sprintf "(%Lu, %u) -> (%Lu, %u)" t.start_sector t.start_offset t.end_sector t.end_offset
-
-    (* Transforms a large read of [num_sectors] starting at [sector] into a Lwt_stream
-       of single_requests, where each request will fit on the ring. *)
-    let stream_of sector num_sectors =
-      let from (sector, num_sectors) =
-        assert (sector >= 0L);
-        assert (num_sectors > 0L);
-        (* Round down the starting sector in order to get a page aligned sector *)
-        let start_sector = Int64.(mul 8L (div sector 8L)) in
-        let start_offset = Int64.(to_int (sub sector start_sector)) in
-        (* Round up the ending sector to the page boundary *)
-        let end_sector = Int64.(mul 8L (div (add (add sector num_sectors) 7L) 8L)) in
-        (* Calculate number of sectors needed *)
-        let total_sectors_needed = Int64.(sub end_sector start_sector) in
-        (* Maximum of 11 segments per request; 1 page (8 sectors) per segment so: *)
-        let total_sectors_possible = min 88L total_sectors_needed in
-        let possible_end_sector = Int64.add start_sector total_sectors_possible in
-        let end_offset = min 7 (Int64.(to_int (sub 7L (sub possible_end_sector (add sector num_sectors))))) in
-
-        let first = { start_sector; start_offset; end_sector = possible_end_sector; end_offset } in
-        if total_sectors_possible < total_sectors_needed
-        then
-          let num_sectors = Int64.(sub num_sectors (sub total_sectors_possible (of_int start_offset))) in
-          first, Some ((Int64.add start_sector total_sectors_possible), num_sectors)
-        else
-          first, None in
-      let state = ref (Some (sector, num_sectors)) in
-      Lwt_stream.from
-        (fun () ->
-           match !state with
-           | None -> return None
-           | Some x ->
-             let item, state' = from x in
-             state := state';
-             return (Some item)
-        )
-
-    let list_of sector num_sectors =
-      Lwt_stream.to_list (stream_of sector num_sectors)
-  end in
-  let requests = Single_request.stream_of sector num_sectors in
-  let read_single_request t r =
-    let open Single_request in
-    let len = npages_of r in
-    let pages = Io_page.(to_pages (get len)) in
-    let open Lwt.Infix in
-    single_request_into Req.Read t r.start_sector
-        ~start_offset:r.start_offset ~end_offset:r.end_offset pages
-    >>= fun () ->
-    return (Lwt_stream.of_list
-              (List.rev
-                 (snd
-                    (List.fold_left
-                       (fun (i, acc) page ->
-                          let start_offset = match i with
-                            |0 -> r.start_offset * 512
-                            |_ -> 0 in
-                          let end_offset = match i with
-                            |n when n = len-1 -> (r.end_offset + 1) * 512
-                            |_ -> 4096 in
-                          let bytes = end_offset - start_offset in
-                          let subpage = Cstruct.sub (Io_page.to_cstruct page) start_offset bytes in
-                          i + 1, subpage :: acc
-                       ) (0, []) pages
-                    )))) in
-  Lwt_stream.(concat (map_s (read_single_request t) requests))
-
 let resume t =
   let vdev = sprintf "%d" t.vdev in
   let open Lwt.Infix in
@@ -420,9 +318,9 @@ let resume t =
   return ()
 
 let resume () =
-  let devs = Hashtbl.fold (fun k v acc -> (k,v)::acc) devices [] in
+  let devs = Hashtbl.fold (fun _k v acc -> v::acc) devices [] in
   let open Lwt.Infix in
-  Lwt_list.iter_p (fun (k,v) ->
+  Lwt_list.iter_p (fun v ->
     v >>= fun v ->
     resume v
   ) devs
@@ -562,8 +460,6 @@ let connect id =
     (fun () ->
       connect_already_locked id
     )
-
-let id t = string_of_int t.vdev
 
 exception Buffer_not_exactly_one_page
 let to_iopage x =

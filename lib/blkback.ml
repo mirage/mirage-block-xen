@@ -42,7 +42,6 @@ val after: Eventchn.t -> event -> event Lwt.t
 end
 
 open Lwt
-open Printf
 open Blkproto
 open Gnt
 
@@ -245,7 +244,7 @@ let service_thread t stats =
               (if r.op = Req.Read then t.ops.read else t.ops.write) r.sector r.buffers
               >>= fun () ->
               return Res.OK
-            ) (fun e ->
+            ) (fun _e ->
               return Res.Error )
           >>= fun result ->
           let open Res in
@@ -296,7 +295,7 @@ let init xg xe domid ring_info ops =
   | Some mapping ->
     let buf = Gnttab.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
-    let ring = Ring.Rpc.Back.init ring in
+    let ring = Ring.Rpc.Back.init ~sring:ring in
     let ring_utilisation = Array.make (Ring.Rpc.Back.nr_ents ring + 1) 0 in
     let segments_per_request = Array.make (Blkproto.max_segments_per_request + 1) 0 in
     let total_requests = 0 and total_ok = 0 and total_error = 0 in
@@ -332,7 +331,7 @@ let mk_backend_path client name (domid,devid) =
   >>= fun self ->
   return (Printf.sprintf "/local/domain/%d/backend/%s/%d/%d" self name domid devid)
 
-let mk_frontend_path client (domid,devid) =
+let mk_frontend_path (domid,devid) =
   return (Printf.sprintf "/local/domain/%d/device/vbd/%d" domid devid)
 
 let writev client pairs =
@@ -388,7 +387,7 @@ let force_close (domid, device) =
   let open Lwt.Infix in
   make ()
   >>= fun client ->
-  mk_frontend_path client (domid, device)
+  mk_frontend_path (domid, device)
   >>= fun frontend_path ->
   write_one client (frontend_path ^ "/state") (Blkproto.State.to_string Blkproto.State.Closed)
 
@@ -506,7 +505,7 @@ let create ?backend_domid name (domid, device) =
   (* Construct the device: *)
   mk_backend_path client name (domid, device)
   >>= fun backend_path ->
-  mk_frontend_path client (domid, device)
+  mk_frontend_path (domid, device)
   >>= fun frontend_path ->
   ( match backend_domid with
   | None -> get_my_domid client
@@ -539,7 +538,7 @@ let destroy name (domid, device) =
   >>= fun client ->
   mk_backend_path client name (domid, device)
   >>= fun backend_path ->
-  mk_frontend_path client (domid, device)
+  mk_frontend_path (domid, device)
   >>= fun frontend_path ->
   immediate client (fun xs ->
     (Lwt.catch (fun () -> rm xs backend_path) (fun _ -> return ()))
