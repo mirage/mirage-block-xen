@@ -15,20 +15,16 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-type ('a, 'b) result = [
-  | `OK of 'a
-  | `Error of 'b
-]
 let ( >>= ) x f = match x with
-  | `Error _ as y -> y
-  | `OK x -> f x
+  | Error _ as y -> y
+  | Ok x -> f x
 let list l k =
   if not(List.mem_assoc k l)
-  then `Error (Printf.sprintf "missing %s key" k)
-  else `OK (List.assoc k l)
-let int x = try `OK (int_of_string x) with _ -> `Error ("not an int: " ^ x)
-let int32 x = try `OK (Int32.of_string x) with _ -> `Error ("not an int32: " ^ x)
-let int64 x = try `OK (Int64.of_string x) with _ -> `Error ("not an int64: " ^ x)
+  then Error (`Msg (Printf.sprintf "missing %s key" k))
+  else Ok (List.assoc k l)
+let int x = try Ok (int_of_string x) with _ -> Error (`Msg ("not an int: " ^ x))
+let int32 x = try Ok (Int32.of_string x) with _ -> Error (`Msg ("not an int32: " ^ x))
+let int64 x = try Ok (Int64.of_string x) with _ -> Error (`Msg ("not an int64: " ^ x))
 
 (* Control messages via xenstore *)
 
@@ -78,8 +74,8 @@ module State = struct
 
   let of_int x =
     if List.mem_assoc x table
-    then `OK (List.assoc x table)
-    else `Error (Printf.sprintf "unknown device state: %d" x)
+    then Ok (List.assoc x table)
+    else Error (`Msg (Printf.sprintf "unknown device state: %d" x))
 
   let _state = "state"
   let keys = [ _state ]
@@ -132,10 +128,10 @@ module Protocol = struct
   type t = X86_64 | X86_32 | Native
 
   let of_string = function
-    | "x86_32-abi" -> `OK X86_32
-    | "x86_64-abi" -> `OK X86_64
-    | "native"     -> `OK Native
-    | x            -> `Error ("unknown protocol: " ^ x)
+    | "x86_32-abi" -> Ok X86_32
+    | "x86_64-abi" -> Ok X86_64
+    | "native"     -> Ok Native
+    | x            -> Error (`Msg ("unknown protocol: " ^ x))
 
   let to_string = function
     | X86_64 -> "x86_64-abi"
@@ -159,11 +155,11 @@ module FeatureIndirect = struct
 
   let of_assoc_list l =
     if not(List.mem_assoc _max_indirect_segments l)
-    then `OK { max_indirect_segments = 0 }
+    then Ok { max_indirect_segments = 0 }
     else
       let x = List.assoc _max_indirect_segments l in
       int x >>= fun max_indirect_segments ->
-      `OK { max_indirect_segments }
+      Ok { max_indirect_segments }
 end
 
 module DiskInfo = struct
@@ -193,7 +189,7 @@ module DiskInfo = struct
     >>= fun info ->
     let media = Media.of_int info
     and mode = Mode.of_int info in
-    `OK { sectors; sector_size; media; mode }
+    Ok { sectors; sector_size; media; mode }
 end
 
 module RingInfo = struct
@@ -230,7 +226,7 @@ module RingInfo = struct
     >>= fun event_channel ->
     list l _protocol >>= fun x -> Protocol.of_string x
     >>= fun protocol ->
-    `OK { ref; event_channel; protocol }
+    Ok { ref; event_channel; protocol }
 end
 
 module Hotplug = struct
