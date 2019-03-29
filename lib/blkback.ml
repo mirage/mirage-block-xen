@@ -447,8 +447,8 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
     readv client frontend_path Blkproto.RingInfo.keys
     >>= fun frontend ->
     let ring_info = match Blkproto.RingInfo.of_assoc_list frontend with
-      | `OK x -> x
-      | `Error x -> failwith x in
+      | Ok x -> x
+      | Error (`Msg x) -> failwith x in
     Log.info (fun f-> f "%s" (Blkproto.RingInfo.to_string ring_info));
     let device_read ofs bufs =
       Lwt.catch
