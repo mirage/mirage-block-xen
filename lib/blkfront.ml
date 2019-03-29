@@ -22,10 +22,7 @@ open Blkproto
 open Gnt
 open OS
 
-let src =
-  let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront" in
-  Logs.Src.set_level src (Some Logs.Info);
-  src
+let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
