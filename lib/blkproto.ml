@@ -24,7 +24,6 @@ let list l k =
   else Ok (List.assoc k l)
 let int x = try Ok (int_of_string x) with _ -> Error (`Msg ("not an int: " ^ x))
 let int32 x = try Ok (Int32.of_string x) with _ -> Error (`Msg ("not an int32: " ^ x))
-let int64 x = try Ok (Int64.of_string x) with _ -> Error (`Msg ("not an int64: " ^ x))
 
 (* Control messages via xenstore *)
 
@@ -33,14 +32,9 @@ module Mode = struct
   let to_string = function
     | ReadOnly -> "r"
     | ReadWrite -> "w"
-  let _of_string = function
-    | "r" -> Some ReadOnly
-    | "w" -> Some ReadWrite
-    | _ -> None
   let to_int = function
     | ReadOnly -> 4 (* VDISK_READONLY *)
     | ReadWrite -> 0
-  let of_int x = if (x land 4) = 4 then ReadOnly else ReadWrite
 end
 
 module Media = struct
@@ -48,14 +42,9 @@ module Media = struct
   let to_string = function
     | CDROM -> "cdrom"
     | Disk -> "disk"
-  let _of_string = function
-    | "cdrom" -> Some CDROM
-    | "disk" -> Some Disk
-    | _ -> None
   let to_int = function
     | CDROM -> 1 (* VDISK_CDROM *)
     | Disk  -> 0
-  let of_int x = if (x land 1) = 1 then CDROM else Disk
 end
 
 module State = struct
@@ -72,17 +61,7 @@ module State = struct
   let to_string t = string_of_int (List.assoc t table' )
   let of_string t = try Some (List.assoc (int_of_string t) table) with _ -> None
 
-  let of_int x =
-    if List.mem_assoc x table
-    then Ok (List.assoc x table)
-    else Error (`Msg (Printf.sprintf "unknown device state: %d" x))
-
   let _state = "state"
-  let _keys = [ _state ]
-  let _of_assoc_list l =
-    list l _state >>= fun x ->
-    int x >>= fun x ->
-    of_int x
   let to_assoc_list t = [
     _state, string_of_int (List.assoc t table')
   ]
@@ -153,13 +132,6 @@ module FeatureIndirect = struct
     then [] (* don't advertise the feature *)
     else [ _max_indirect_segments, string_of_int t.max_indirect_segments ]
 
-  let _of_assoc_list l =
-    if not(List.mem_assoc _max_indirect_segments l)
-    then Ok { max_indirect_segments = 0 }
-    else
-      let x = List.assoc _max_indirect_segments l in
-      int x >>= fun max_indirect_segments ->
-      Ok { max_indirect_segments }
 end
 
 module DiskInfo = struct
@@ -180,16 +152,6 @@ module DiskInfo = struct
     _info, string_of_int (Media.to_int t.media lor (Mode.to_int t.mode));
   ]
 
-  let _of_assoc_list l =
-    list l _sector_size >>= fun x -> int x
-    >>= fun sector_size ->
-    list l _sectors >>= fun x -> int64 x
-    >>= fun sectors ->
-    list l _info >>= fun x -> int x
-    >>= fun info ->
-    let media = Media.of_int info
-    and mode = Mode.of_int info in
-    Ok { sectors; sector_size; media; mode }
 end
 
 module RingInfo = struct
@@ -211,12 +173,6 @@ module RingInfo = struct
     _ring_ref;
     _event_channel;
     _protocol;
-  ]
-
-  let _to_assoc_list t = [
-    _ring_ref, Int32.to_string t.ref;
-    _event_channel, string_of_int t.event_channel;
-    _protocol, Protocol.to_string t.protocol
   ]
 
   let of_assoc_list l =
@@ -256,9 +212,6 @@ module Req = struct
   | Flush -> "Flush" | Op_reserved_1 -> "Op_reserved_1" | Trim -> "Trim"
   | Indirect_op -> "Indirect_op"
 
-  [@@@warning "-38"]
-  exception Unknown_request_type of int
-
   (* Defined in include/xen/io/blkif.h BLKIF_MAX_SEGMENTS_PER_REQUEST *)
   let segments_per_request = 11
 
@@ -268,16 +221,9 @@ module Req = struct
     last_sector: int;
   }
 
-  let string_of_seg seg =
-    Printf.sprintf "{gref=%ld first=%d last=%d}" seg.gref seg.first_sector seg.last_sector
-
   type segs =
   | Direct of seg array
   | Indirect of int32 array
-
-  let string_of_segs = function
-  | Direct segs -> Printf.sprintf "direct [ %s ]" (String.concat "; " (List.map string_of_seg (Array.to_list segs)))
-  | Indirect refs -> Printf.sprintf "indirect [ %s ]" (String.concat "; " (List.map Int32.to_string (Array.to_list refs)))
 
   (* Defined in include/xen/io/blkif.h : blkif_request_t *)
   type t = {
@@ -288,11 +234,6 @@ module Req = struct
     nr_segs: int;
     segs: segs;
   }
-
-  let _string_of t =
-    Printf.sprintf "{ op=%s handle=%d id=%Ld sector=%Ld segs=%s (total %d) }"
-    (match t.op with Some x -> string_of_op x | None -> "None")
-      t.handle t.id t.sector (string_of_segs t.segs) t.nr_segs
 
   (* The segment looks the same in both 32-bit and 64-bit versions *)
   [%%cstruct
