@@ -321,38 +321,29 @@ let resume () =
     resume v
   ) devs
 
-let disconnect (t:t) : unit Lwt.t =
+let disconnect t =
   let open Lwt.Infix in
   let frontend_node = sprintf "device/vbd/%d/%s" t.vdev in
   let backend_state = sprintf "%s/state" t.t.backend in
   Xs.make () >>= fun xs ->
-  (* first, set the frontend state to Closing. *)
   Xs.(immediate xs (fun h -> write h (frontend_node "state")
                        Device_state.(to_string Closing))) >>= fun () ->
-  (* wait for the backend to set its state to Closing or Closed. *)
   Xs.(wait xs (fun h -> read h backend_state >>= fun state ->
       match Device_state.of_string state with
       | Closing | Closed -> Lwt.return_unit
       | _ -> fail Xs_protocol.Eagain)) >>= fun () ->
-  (* set frontend state to Closed *)
   Xs.(immediate xs (fun h -> write h (frontend_node "state")
                        Device_state.(to_string Closed))) >>= fun () ->
-  (* wait for backend to set its state to Closed (or higher, which we don't recognize) *)
   Xs.(wait xs (fun h -> read h backend_state >>= fun state ->
       match Device_state.of_string state with
       | Closed -> Lwt.return_unit
       | _ -> fail Xs_protocol.Eagain)) >>= fun () ->
-  (* set frontend state to Initialising *)
   Xs.(immediate xs (fun h -> write h (frontend_node "state")
                        Device_state.(to_string Initialising))) >>= fun () ->
-  (* wait for the backend to set its state to something >= Closed. *)
   Xs.(wait xs (fun h -> read h backend_state >>= fun state ->
       match Device_state.of_string state with
       | InitWait | Initialised | Connected | Closing -> Lwt.return_unit
       | _ -> fail Xs_protocol.Eagain)) >>= fun () ->
-  (* finally, remove the tree. *)
-  Xs.(immediate xs (fun h -> rm h (sprintf "device/vbd/%d" t.vdev))) >>= fun () ->
-  (* and end access to all the grants. *)
   Lwt_list.iter_s (fun ref -> OS.Xen.Export.end_access ~release_ref:true ref) t.t.gnts
 
 type error = [ Mirage_block.error | `Exn of exn ]
