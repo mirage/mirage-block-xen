@@ -246,8 +246,7 @@ let with_segs t ~start_offset ~end_offset (rs:OS.Xen.Gntref.t array) fn =
       let last_sector = match i with
         | n when n == len-1 -> end_offset
         | _ -> 7 in
-      let gref = OS.Xen.Gntref.to_int32 rf in
-      { Req.gref; first_sector; last_sector }
+      { Req.gref = rf; first_sector; last_sector }
     ) rs in
   if len <= 11 then (
     fn (Req.Direct segs)

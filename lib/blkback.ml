@@ -112,7 +112,7 @@ let service_thread t stats =
 
   let grants_of_segments = List.map (fun seg -> {
     OS.Xen.Import.domid = t.domid;
-    ref = Gntref.of_int32 seg.Req.gref;
+    ref = seg.Req.gref;
   }) in
 
   let rec loop_forever after =
@@ -221,7 +221,7 @@ let service_thread t stats =
         | Some ((Req.Read | Req.Write) as op) ->
           (try
              let bufs = List.map (fun seg ->
-              let page = lookup_mapping (OS.Xen.Gntref.of_int32 seg.Req.gref) in
+              let page = lookup_mapping seg.Req.gref in
               let frag = Cstruct.sub page (seg.Req.first_sector * 512) ((seg.Req.last_sector - seg.Req.first_sector + 1) * 512) in
               frag) segs in
             add acc request.Req.id op request.Req.sector bufs
