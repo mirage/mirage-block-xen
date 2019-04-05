@@ -1,3 +1,8 @@
+## 1.6.1 (2019-04-02):
+* use new grant API from mirage-xen (@yomimono, @talex5)
+* several code cleanups and removals (@yomimono, @emillon)
+* remove ppx_cstruct direct dependency (@TheLortex)
+
 ## 1.6.0 (2019-01-11):
 * Port to dune from jbuilder (@avsm)
 

@@ -2,7 +2,7 @@
  (name mirage_block_xen)
  (public_name mirage-block-xen)
  (modules Blkproto Device_number)
- (libraries cstruct io-page)
+ (libraries cstruct io-page mirage-xen)
  (wrapped false)
  (preprocess
   (pps ppx_cstruct)))
@@ -13,7 +13,7 @@
  (modules Blkfront Block)
  (libraries logs stringext lwt cstruct mirage-block-lwt io-page
    io-page-xen shared-memory-ring shared-memory-ring-lwt mirage-block-xen
-   xen-evtchn xen-gnt mirage-xen)
+   xen-evtchn mirage-xen)
  (wrapped false))
 
 (library
@@ -21,6 +21,6 @@
  (public_name mirage-block-xen.back)
  (modules Blkback Block_request)
  (libraries logs lwt cstruct io-page shared-memory-ring
-   shared-memory-ring-lwt mirage-block-xen xen-evtchn xen-gnt xenstore
-   xenstore.client mirage-block-lwt rresult)
+   shared-memory-ring-lwt mirage-block-xen xen-evtchn xenstore
+   xenstore.client mirage-block-lwt rresult mirage-xen)
  (wrapped false))

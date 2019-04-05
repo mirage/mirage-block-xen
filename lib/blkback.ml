@@ -43,7 +43,7 @@ end
 
 open Lwt
 open Blkproto
-open Gnt
+module Gntref = OS.Xen.Gntref
 
 type ops = {
   read : int64 -> Cstruct.t list -> unit Lwt.t;
@@ -51,7 +51,7 @@ type ops = {
 }
 
 type stats = {
-  ring_utilisation: int array; (* one entry per leval, last entry includes all larger levels *)
+  ring_utilisation: int array; (* one entry per level, last entry includes all larger levels *)
   segments_per_request: int array; (* one entry per number of segments *)
   mutable total_requests: int;
   mutable total_ok: int;
@@ -60,7 +60,6 @@ type stats = {
 
 type ('a, 'b) t = {
   domid:  int;
-  xg:     Gnttab.interface;
   xe:     Eventchn.handle;
   evtchn: Eventchn.t;
   ring:   ('a, 'b) Ring.Rpc.Back.t;
@@ -71,15 +70,9 @@ type ('a, 'b) t = {
 let page_size = 4096
 
 module Opt = struct
-  let map f = function
-    | None -> None
-    | Some x -> Some (f x)
   let iter f = function
     | None -> ()
     | Some x -> f x
-  let default d = function
-    | None -> d
-    | Some x -> x
 end
 
 module Request = struct
@@ -118,8 +111,8 @@ end
 let service_thread t stats =
 
   let grants_of_segments = List.map (fun seg -> {
-    Gnttab.domid = t.domid;
-    ref = Int32.to_int seg.Req.gref;
+    OS.Xen.Import.domid = t.domid;
+    ref = seg.Req.gref;
   }) in
 
   let rec loop_forever after =
@@ -129,30 +122,35 @@ let service_thread t stats =
        the indirect descriptors which must be mapped before we
        can form the second batch. *)
 
-    (* a convenience table of grantref -> page Cstruct.t *)
-    let grant_table = Hashtbl.create 16 in
+    (* values in this grant table should be Cstruct.t's that can be converted to Io_page.t's *)
+    let (grant_table : (OS.Xen.Gntref.t, Cstruct.t) Hashtbl.t) = Hashtbl.create 16 in
 
     let lookup_mapping gref =
       if not(Hashtbl.mem grant_table gref) then begin
-        Log.err (fun f -> f "FATAL: failed to find mapped grant reference %ld" gref);
+        Log.err (fun f -> f "FATAL: failed to find mapped grant reference %s" @@ OS.Xen.Gntref.to_string gref);
         failwith "failed to find mapped grant reference"
       end else Hashtbl.find grant_table gref in
 
     let maybe_mapv writable = function
       | [] -> None (* nothing to do *)
       | grants ->
-        begin match Gnttab.mapv t.xg grants writable with
-          | None ->
-            Log.err (fun f -> f "FATAL: failed to map batch of %d grant references" (List.length grants));
+        begin match OS.Xen.Import.mapv grants ~writable with
+          | Error (`Msg s) ->
+            Log.err (fun f -> f "FATAL: failed to map batch of %d grant references: %s" (List.length grants) s);
             failwith "Failed to map grants" (* TODO: handle this error cleanly *)
-          | Some x ->
-            let buf = Io_page.to_cstruct (Gnttab.Local_mapping.to_buf x) in
-            let _ = List.fold_left (fun i gref -> Hashtbl.add grant_table (Int32.of_int gref.Gnttab.ref) (Cstruct.sub buf (4096 * i) 4096); i + 1) 0 grants in
+          | Ok x ->
+            let buf = Io_page.to_cstruct @@ OS.Xen.Import.Local_mapping.to_buf x in
+            let () =
+              List.iteri (fun i import ->
+                  let region = Cstruct.sub buf (page_size * i) page_size in
+                  Hashtbl.add grant_table import.OS.Xen.Import.ref region
+               ) grants
+            in
             Some x
         end in
     let maybe_unmap mapping =
       try
-        Opt.iter (Gnttab.unmap_exn t.xg) mapping
+        Opt.iter OS.Xen.Import.Local_mapping.unmap_exn mapping
       with e ->
         Log.err (fun f -> f "FATAL: failed to unmap grant references (frontend will be confused (%s)" (Printexc.to_string e)) in
 
@@ -169,7 +167,10 @@ let service_thread t stats =
          q := req :: !q;
          match req.segs with
          | Indirect grefs ->
-           let grefs = List.map (fun g -> { Gnttab.domid = t.domid; ref = Int32.to_int g }) (Array.to_list grefs) in
+           let grefs = List.map (fun g ->
+               { OS.Xen.Import.domid = t.domid; ref = Gntref.of_int32 g }
+             ) (Array.to_list grefs)
+           in
            indirect_grants := grefs @ (!indirect_grants)
          | Direct _ -> ()
       );
@@ -180,7 +181,7 @@ let service_thread t stats =
     let q = List.map (fun req -> match req.Req.segs with
       | Req.Direct _ -> req
       | Req.Indirect [| gref |] ->
-        let page = lookup_mapping gref in
+        let page = lookup_mapping (OS.Xen.Gntref.of_int32 gref) in
         let segs = Blkproto.Req.get_segments page req.Req.nr_segs in
         { req with Req.segs = Req.Direct segs }
       | Req.Indirect _ ->
@@ -277,7 +278,7 @@ let service_thread t stats =
     loop_forever next in
   loop_forever A.program_start
 
-let init xg xe domid ring_info ops =
+let init xe domid ring_info ops =
   let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
   let parse_req, idx_size = match ring_info.RingInfo.protocol with
     | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
@@ -285,26 +286,27 @@ let init xg xe domid ring_info ops =
     | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r ->
-      { Gnttab.domid = domid; ref = Int32.to_int r })
+      { OS.Xen.Import.domid = domid; ref = Gntref.of_int32 r })
       [ ring_info.RingInfo.ref ] in
-  match Gnttab.mapv xg grants true with
-  | None ->
+  match OS.Xen.Import.mapv ~writable:true grants with
+  | Error (`Msg s) ->
+    Log.err (fun f -> f "OS.Xen.Import.mapv failed during initialization: %s" s);
     failwith "Gnttab.mapv failed"
-  | Some mapping ->
-    let buf = Gnttab.Local_mapping.to_buf mapping in
+  | Ok mapping ->
+    let buf = OS.Xen.Import.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ~sring:ring in
     let ring_utilisation = Array.make (Ring.Rpc.Back.nr_ents ring + 1) 0 in
     let segments_per_request = Array.make (Blkproto.max_segments_per_request + 1) 0 in
     let total_requests = 0 and total_ok = 0 and total_error = 0 in
     let stats = { ring_utilisation; segments_per_request; total_requests; total_ok; total_error } in
-    let t = { domid; xg; xe; evtchn; ops; parse_req; ring } in
+    let t = { domid; xe; evtchn; ops; parse_req; ring } in
     let th = service_thread t stats in
     on_cancel th (fun () ->
       let counter = ref 0 in
       Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
       if !counter <> 0 then Log.err (fun f-> f "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?" !(counter));
-      let () = Gnttab.unmap_exn xg mapping in ()
+      let () = OS.Xen.Import.Local_mapping.unmap_exn mapping in ()
     );
     th, stats
 
@@ -394,7 +396,6 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
   let open Mirage_block in
   make ()
   >>= fun client ->
-  let xg = Gnttab.interface_open () in
   let xe = Eventchn.init () in
 
   mk_backend_path client name (domid,devid)
@@ -468,7 +469,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
         ) (fun e ->
           Log.err (fun f -> f "blkback: write exception: %s, offset=%Ld" (Printexc.to_string e) ofs);
           Lwt.fail e) in
-    let be_thread, stats = init xg xe domid ring_info {
+    let be_thread, stats = init xe domid ring_info {
       read = device_read;
       write = device_write;
     } in
