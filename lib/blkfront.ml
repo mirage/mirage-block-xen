@@ -19,7 +19,9 @@ open Lwt
 open Printf
 open Mirage_block
 open Blkproto
-open OS
+open Os_xen
+
+module OS = Os_xen
 
 let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront"
 

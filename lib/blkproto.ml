@@ -15,6 +15,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+module OS = Os_xen
+
 let ( >>= ) x f = match x with
   | Error _ as y -> y
   | Ok x -> f x
@@ -277,9 +279,9 @@ module Req = struct
     val get_hdr_indirect_op: Cstruct.t -> int
     val set_hdr_indirect_op: Cstruct.t -> int -> unit
   end
-  module type PROTOCOL_IMPLEMENTATION = sig 
-    val total_size : int 
-    val segments_per_indirect_page : int 
+  module type PROTOCOL_IMPLEMENTATION = sig
+    val total_size : int
+    val segments_per_indirect_page : int
     val write_segments : seg array -> Cstruct.t -> unit
     val write_request : t -> Cstruct.t -> int64
     val read_request : Cstruct.t -> t
