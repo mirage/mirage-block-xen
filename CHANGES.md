@@ -1,3 +1,6 @@
+## 1.6.2
+* generate exact Merlin files by rearranging build (@avsm)
+
 ## 1.6.1 (2019-04-02):
 * use new grant API from mirage-xen (@yomimono, @talex5)
 * several code cleanups and removals (@yomimono, @emillon)
