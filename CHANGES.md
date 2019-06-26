@@ -1,5 +1,6 @@
-## 1.6.2
-* generate exact Merlin files by rearranging build (@avsm)
+## v1.6.2 (2019-06-26)
+* Use mirage-xen 4.0 `Os_xen` module (#81 @TheLortex)
+* generate exact Merlin files by rearranging build (#82 @avsm)
 
 ## 1.6.1 (2019-04-02):
 * use new grant API from mirage-xen (@yomimono, @talex5)
