@@ -8,7 +8,7 @@ doc: "https://mirage.github.io/mirage-block-xen/"
 bug-reports: "https://github.com/mirage/mirage-block-xen/issues"
 depends: [
   "ocaml" {>= "4.02.0"}
-  "dune" {build}
+  "dune"
   "cmdliner"
   "logs"
   "stringext"
@@ -43,8 +43,4 @@ library which enables high-throughput, low-latency data
 transfers over shared memory on both x86 and ARM architectures,
 using the standard Xen RPC and event channel semantics.
 """
-
-pin-depends: [
-  ["mirage-xen.dev" "git+https://github.com/mirage/mirage-xen"]
-]
 
