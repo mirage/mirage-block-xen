@@ -44,7 +44,3 @@ transfers over shared memory on both x86 and ARM architectures,
 using the standard Xen RPC and event channel semantics.
 """
 
-pin-depends: [
-  ["mirage-xen.dev" "git+https://github.com/mirage/mirage-xen"]
-]
-
