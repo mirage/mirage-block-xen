@@ -13,5 +13,5 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
-include Mirage_block_lwt.S
+include Mirage_block.S
 val connect : string -> t Lwt.t

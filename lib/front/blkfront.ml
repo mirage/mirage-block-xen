@@ -27,10 +27,6 @@ let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront"
 
 module Log = (val Logs.src_log src : Logs.LOG)
 
-type 'a io = 'a Lwt.t
-
-type page_aligned_buffer = Cstruct.t
-
 type transport = {
   backend_id: int;
   backend: string;

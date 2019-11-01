@@ -102,7 +102,7 @@ let is_writable req = match req.Req.op with
   Log.err (fun f -> f "FATAL: unhandled request type %s" (Req.string_of_op op));
   failwith "unhandled request type"
 
-module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: Mirage_block_lwt.S) = struct
+module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: Mirage_block.S) = struct
 
 module BlockError = struct
   open Lwt
