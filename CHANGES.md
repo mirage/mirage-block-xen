@@ -1,3 +1,7 @@
+## v1.7.0 (2019-11-01)
+* Adapt to mirage-xen 5.0.0 API changes (#86 @hannesm)
+* Adapt to mriage-block 2.0.0 API changs (#86 @hannesm)
+
 ## v1.6.2 (2019-06-26)
 * Use mirage-xen 4.0 `Os_xen` module (#81 @TheLortex)
 * generate exact Merlin files by rearranging build (#82 @avsm)
