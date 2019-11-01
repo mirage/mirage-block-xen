@@ -15,8 +15,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-module OS = Os_xen
-
 let ( >>= ) x f = match x with
   | Error _ as y -> y
   | Ok x -> f x

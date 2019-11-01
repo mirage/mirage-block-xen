@@ -44,7 +44,6 @@ end
 open Lwt
 open Blkproto
 
-module OS = Os_xen
 module Gntref = OS.Xen.Gntref
 
 type ops = {
@@ -307,7 +306,7 @@ let init xe domid ring_info ops =
     on_cancel th (fun () ->
       let counter = ref 0 in
       Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
-      if !counter <> 0 then Log.err (fun f-> f "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lOSt?" !(counter));
+      if !counter <> 0 then Log.err (fun f-> f "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?" !(counter));
       let () = OS.Xen.Import.Local_mapping.unmap_exn mapping in ()
     );
     th, stats
