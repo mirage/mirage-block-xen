@@ -299,24 +299,6 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
       | exn -> fail exn) in
   retry ()
 
-let resume t =
-  let vdev = sprintf "%d" t.vdev in
-  let open Lwt.Infix in
-  plug vdev
-  >>= fun transport ->
-  let old_t = t.t in
-  t.t <- transport;
-  Lwt_ring.Front.shutdown old_t.client;
-  return ()
-
-let resume () =
-  let devs = Hashtbl.fold (fun _k v acc -> v::acc) devices [] in
-  let open Lwt.Infix in
-  Lwt_list.iter_p (fun v ->
-    v >>= fun v ->
-    resume v
-  ) devs
-
 let disconnect t =
   let open Lwt.Infix in
   let frontend_node = sprintf "device/vbd/%d/%s" t.vdev in
@@ -504,7 +486,3 @@ let write t start_sector pages =
       >>= fun () ->
       return (Ok ())
     ) (fun e -> return (Error (`Exn e)))
-
-let _ =
-  Log.debug (fun f -> f "Blkfront: add resume hook");
-  Sched.add_resume_hook resume

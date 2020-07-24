@@ -32,7 +32,7 @@ type event
 val program_start: event
 (** represents an event which 'fired' when the program started *)
 
-val after: Eventchn.t -> event -> event Lwt.t
+val after: OS.Eventchn.t -> event -> event Lwt.t
 (** [next channel event] blocks until the system receives an event
     newer than [event] on channel [channel]. If an event is received
     while we aren't looking then this will be remembered and the
@@ -61,8 +61,8 @@ type stats = {
 
 type ('a, 'b) t = {
   domid:  int;
-  xe:     Eventchn.handle;
-  evtchn: Eventchn.t;
+  xe:     OS.Eventchn.handle;
+  evtchn: OS.Eventchn.t;
   ring:   ('a, 'b) Ring.Rpc.Back.t;
   ops :   ops;
   parse_req : Cstruct.t -> Req.t;
@@ -271,7 +271,7 @@ let service_thread t stats =
       maybe_unmap indirect_grants_mapping;
       (* Make the responses visible to the frontend *)
       let notify = Ring.Rpc.Back.push_responses_and_check_notify t.ring in
-      if notify then Eventchn.notify t.xe t.evtchn;
+      if notify then OS.Eventchn.notify t.xe t.evtchn;
       return () in
     let open Lwt.Infix in
     A.after t.evtchn after
@@ -280,7 +280,7 @@ let service_thread t stats =
   loop_forever A.program_start
 
 let init xe domid ring_info ops =
-  let evtchn = Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
+  let evtchn = OS.Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
   let parse_req, idx_size = match ring_info.RingInfo.protocol with
     | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
     | Protocol.X86_32 -> Req.Proto_32.read_request, Req.Proto_32.total_size
@@ -397,7 +397,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
   let open Mirage_block in
   make ()
   >>= fun client ->
-  let xe = Eventchn.init () in
+  let xe = OS.Eventchn.init () in
 
   mk_backend_path client name (domid,devid)
   >>= fun backend_path ->

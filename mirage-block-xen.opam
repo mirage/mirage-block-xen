@@ -18,8 +18,8 @@ depends: [
   "shared-memory-ring-lwt"
   "mirage-block" {>= "2.0.0"}
   "ipaddr"
-  "io-page-xen" {>= "2.0.0"}
-  "mirage-xen" {>= "5.0.0"}
+  "io-page" {>= "2.0.0"}
+  "mirage-xen" {>= "6.0.0"}
   "rresult"
 ]
 build: [
