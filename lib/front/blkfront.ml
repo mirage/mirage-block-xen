@@ -195,7 +195,7 @@ let enumerate () =
 let deprecated_prefixes = [ "tapdisk"; "tap2"; "aio"; "ioemu"; "file"; "phy" ]
 
 let strip_prefixes x =
-  Stringext.split x ~on:':'
+  String.split_on_char ':' x
   |> List.fold_left (fun acc x -> match acc with
       | [] ->
         if List.mem x deprecated_prefixes

@@ -5,5 +5,5 @@
  (flags :standard -w -3)
  (libraries logs lwt cstruct io-page shared-memory-ring
    shared-memory-ring-lwt mirage-block-xen xenstore
-   xenstore.client mirage-block rresult mirage-xen)
+   xenstore.client mirage-block mirage-xen)
  (wrapped false))

@@ -1,3 +1,6 @@
+## v2.0.0 (2020-10-21)
+* Adapt to mirage-xen 6.0.0 API changes (Solo5 based Xen PVH, #87 @mato)
+
 ## v1.7.0 (2019-11-01)
 * Adapt to mirage-xen 5.0.0 API changes (#86 @hannesm)
 * Adapt to mriage-block 2.0.0 API changs (#86 @hannesm)
