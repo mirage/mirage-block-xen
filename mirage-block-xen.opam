@@ -7,7 +7,7 @@ homepage: "https://github.com/mirage/mirage-block-xen"
 doc: "https://mirage.github.io/mirage-block-xen/"
 bug-reports: "https://github.com/mirage/mirage-block-xen/issues"
 depends: [
-  "ocaml" {>= "4.06.0"}
+  "ocaml" {>= "4.08.0"}
   "dune"
   "cmdliner"
   "logs"
@@ -18,8 +18,8 @@ depends: [
   "shared-memory-ring-lwt"
   "mirage-block" {>= "2.0.0"}
   "ipaddr"
-  "io-page-xen" {>= "2.0.0"}
-  "mirage-xen" {>= "5.0.0"}
+  "io-page" {>= "2.0.0"}
+  "mirage-xen" {>= "6.0.0"}
   "rresult"
 ]
 build: [
