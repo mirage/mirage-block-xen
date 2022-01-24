@@ -32,7 +32,7 @@ type event
 val program_start: event
 (** represents an event which 'fired' when the program started *)
 
-val after: OS.Eventchn.t -> event -> event Lwt.t
+val after: Xen_os.Eventchn.t -> event -> event Lwt.t
 (** [next channel event] blocks until the system receives an event
     newer than [event] on channel [channel]. If an event is received
     while we aren't looking then this will be remembered and the
@@ -44,7 +44,7 @@ end
 open Lwt
 open Blkproto
 
-module Gntref = OS.Xen.Gntref
+module Gntref = Xen_os.Xen.Gntref
 
 type ops = {
   read : int64 -> Cstruct.t list -> unit Lwt.t;
@@ -61,8 +61,8 @@ type stats = {
 
 type ('a, 'b) t = {
   domid:  int;
-  xe:     OS.Eventchn.handle;
-  evtchn: OS.Eventchn.t;
+  xe:     Xen_os.Eventchn.handle;
+  evtchn: Xen_os.Eventchn.t;
   ring:   ('a, 'b) Ring.Rpc.Back.t;
   ops :   ops;
   parse_req : Cstruct.t -> Req.t;
@@ -112,7 +112,7 @@ end
 let service_thread t stats =
 
   let grants_of_segments = List.map (fun seg -> {
-    OS.Xen.Import.domid = t.domid;
+    Xen_os.Xen.Import.domid = t.domid;
     ref = seg.Req.gref;
   }) in
 
@@ -124,34 +124,34 @@ let service_thread t stats =
        can form the second batch. *)
 
     (* values in this grant table should be Cstruct.t's that can be converted to Io_page.t's *)
-    let (grant_table : (OS.Xen.Gntref.t, Cstruct.t) Hashtbl.t) = Hashtbl.create 16 in
+    let (grant_table : (Xen_os.Xen.Gntref.t, Cstruct.t) Hashtbl.t) = Hashtbl.create 16 in
 
     let lookup_mapping gref =
       if not(Hashtbl.mem grant_table gref) then begin
-        Log.err (fun f -> f "FATAL: failed to find mapped grant reference %s" @@ OS.Xen.Gntref.to_string gref);
+        Log.err (fun f -> f "FATAL: failed to find mapped grant reference %s" @@ Xen_os.Xen.Gntref.to_string gref);
         failwith "failed to find mapped grant reference"
       end else Hashtbl.find grant_table gref in
 
     let maybe_mapv writable = function
       | [] -> None (* nothing to do *)
       | grants ->
-        begin match OS.Xen.Import.mapv grants ~writable with
+        begin match Xen_os.Xen.Import.mapv grants ~writable with
           | Error (`Msg s) ->
             Log.err (fun f -> f "FATAL: failed to map batch of %d grant references: %s" (List.length grants) s);
             failwith "Failed to map grants" (* TODO: handle this error cleanly *)
           | Ok x ->
-            let buf = Io_page.to_cstruct @@ OS.Xen.Import.Local_mapping.to_buf x in
+            let buf = Io_page.to_cstruct @@ Xen_os.Xen.Import.Local_mapping.to_buf x in
             let () =
               List.iteri (fun i import ->
                   let region = Cstruct.sub buf (page_size * i) page_size in
-                  Hashtbl.add grant_table import.OS.Xen.Import.ref region
+                  Hashtbl.add grant_table import.Xen_os.Xen.Import.ref region
                ) grants
             in
             Some x
         end in
     let maybe_unmap mapping =
       try
-        Opt.iter OS.Xen.Import.Local_mapping.unmap_exn mapping
+        Opt.iter Xen_os.Xen.Import.Local_mapping.unmap_exn mapping
       with e ->
         Log.err (fun f -> f "FATAL: failed to unmap grant references (frontend will be confused (%s)" (Printexc.to_string e)) in
 
@@ -169,7 +169,7 @@ let service_thread t stats =
          match req.segs with
          | Indirect grefs ->
            let grefs = List.map (fun g ->
-               { OS.Xen.Import.domid = t.domid; ref = Gntref.of_int32 g }
+               { Xen_os.Xen.Import.domid = t.domid; ref = Gntref.of_int32 g }
              ) (Array.to_list grefs)
            in
            indirect_grants := grefs @ (!indirect_grants)
@@ -182,7 +182,7 @@ let service_thread t stats =
     let q = List.map (fun req -> match req.Req.segs with
       | Req.Direct _ -> req
       | Req.Indirect [| gref |] ->
-        let page = lookup_mapping (OS.Xen.Gntref.of_int32 gref) in
+        let page = lookup_mapping (Xen_os.Xen.Gntref.of_int32 gref) in
         let segs = Blkproto.Req.get_segments page req.Req.nr_segs in
         { req with Req.segs = Req.Direct segs }
       | Req.Indirect _ ->
@@ -271,7 +271,7 @@ let service_thread t stats =
       maybe_unmap indirect_grants_mapping;
       (* Make the responses visible to the frontend *)
       let notify = Ring.Rpc.Back.push_responses_and_check_notify t.ring in
-      if notify then OS.Eventchn.notify t.xe t.evtchn;
+      if notify then Xen_os.Eventchn.notify t.xe t.evtchn;
       return () in
     let open Lwt.Infix in
     A.after t.evtchn after
@@ -280,21 +280,21 @@ let service_thread t stats =
   loop_forever A.program_start
 
 let init xe domid ring_info ops =
-  let evtchn = OS.Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
+  let evtchn = Xen_os.Eventchn.bind_interdomain xe domid ring_info.RingInfo.event_channel in
   let parse_req, idx_size = match ring_info.RingInfo.protocol with
     | Protocol.X86_64 -> Req.Proto_64.read_request, Req.Proto_64.total_size
     | Protocol.X86_32 -> Req.Proto_32.read_request, Req.Proto_32.total_size
     | Protocol.Native -> Req.Proto_64.read_request, Req.Proto_64.total_size
   in
   let grants = List.map (fun r ->
-      { OS.Xen.Import.domid = domid; ref = Gntref.of_int32 r })
+      { Xen_os.Xen.Import.domid = domid; ref = Gntref.of_int32 r })
       [ ring_info.RingInfo.ref ] in
-  match OS.Xen.Import.mapv ~writable:true grants with
+  match Xen_os.Xen.Import.mapv ~writable:true grants with
   | Error (`Msg s) ->
-    Log.err (fun f -> f "OS.Xen.Import.mapv failed during initialization: %s" s);
+    Log.err (fun f -> f "Xen_os.Xen.Import.mapv failed during initialization: %s" s);
     failwith "Gnttab.mapv failed"
   | Ok mapping ->
-    let buf = OS.Xen.Import.Local_mapping.to_buf mapping in
+    let buf = Xen_os.Xen.Import.Local_mapping.to_buf mapping in
     let ring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name:"blkback" in
     let ring = Ring.Rpc.Back.init ~sring:ring in
     let ring_utilisation = Array.make (Ring.Rpc.Back.nr_ents ring + 1) 0 in
@@ -307,7 +307,7 @@ let init xe domid ring_info ops =
       let counter = ref 0 in
       Ring.Rpc.Back.ack_requests ring (fun _ -> incr counter);
       if !counter <> 0 then Log.err (fun f-> f "FATAL: before unmapping, there were %d outstanding requests on the ring. Events lost?" !(counter));
-      let () = OS.Xen.Import.Local_mapping.unmap_exn mapping in ()
+      let () = Xen_os.Xen.Import.Local_mapping.unmap_exn mapping in ()
     );
     th, stats
 
@@ -397,7 +397,7 @@ let run ?(max_indirect_segments=256) t name (domid,devid) =
   let open Mirage_block in
   make ()
   >>= fun client ->
-  let xe = OS.Eventchn.init () in
+  let xe = Xen_os.Eventchn.init () in
 
   mk_backend_path client name (domid,devid)
   >>= fun backend_path ->

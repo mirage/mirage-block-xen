@@ -19,7 +19,7 @@ open Lwt
 open Printf
 open Mirage_block
 open Blkproto
-open OS
+open Xen_os 
 
 let src = Logs.Src.create "blkfront" ~doc:"Mirage Xen blkfront"
 
@@ -30,7 +30,7 @@ type transport = {
   backend: string;
   ring: (Res.t,int64) Ring.Rpc.Front.t;
   client: (Res.t,int64) Lwt_ring.Front.t;
-  gnts: OS.Xen.Gntref.t list;
+  gnts: Xen_os.Xen.Gntref.t list;
   evtchn: Eventchn.t;
   max_indirect_segments: int;
   info: info;
@@ -57,9 +57,9 @@ let alloc ~order (num,domid) =
 
   let pages = Io_page.to_pages buf in
   let open Lwt.Infix in
-  OS.Xen.Export.get_n (List.length pages) >>= fun gnts ->
+  Xen_os.Xen.Export.get_n (List.length pages) >>= fun gnts ->
   List.iter (fun (gnt, page) ->
-      OS.Xen.Export.grant_access ~domid ~writable:true gnt page)
+      Xen_os.Xen.Export.grant_access ~domid ~writable:true gnt page)
     (List.combine gnts pages);
 
   let sring = Ring.Rpc.of_buf ~buf:(Io_page.to_cstruct buf) ~idx_size ~name in
@@ -131,10 +131,10 @@ let plug (id:id) =
     let rfs = snd
         (List.fold_left (fun (i, acc) g ->
              (i + 1),
-             ((sprintf "ring-ref%d" i, OS.Xen.Gntref.to_string g) :: acc)
+             ((sprintf "ring-ref%d" i, Xen_os.Xen.Gntref.to_string g) :: acc)
       ) (0, []) gnts) in
     if ring_page_order = 0
-    then [ "ring-ref", OS.Xen.Gntref.to_string (List.hd gnts) ] (* backwards compat *)
+    then [ "ring-ref", Xen_os.Xen.Gntref.to_string (List.hd gnts) ] (* backwards compat *)
     else [ "ring-page-order", string_of_int ring_page_order ] @ rfs in
   let info = [
     "event-channel", string_of_int port;
@@ -233,7 +233,7 @@ let params_to_frontend_ids ids =
     ) [] ids
 
 (** Create a Direct request if we have 11 or fewer requests, else an Indirect request. *)
-let with_segs t ~start_offset ~end_offset (rs:OS.Xen.Gntref.t array) fn =
+let with_segs t ~start_offset ~end_offset (rs:Xen_os.Xen.Gntref.t array) fn =
   let len = Array.length rs in
   let segs = Array.mapi (fun i rf ->
       let first_sector = match i with
@@ -252,9 +252,9 @@ let with_segs t ~start_offset ~end_offset (rs:OS.Xen.Gntref.t array) fn =
      * anyway. *)
     let indirect_page = Io_page.get 1 in
     Req.Proto_64.write_segments segs (Io_page.to_cstruct indirect_page);
-    OS.Xen.Export.with_ref (fun indirect_ref ->
-      OS.Xen.Export.with_grant ~domid:t.t.backend_id ~writable:false indirect_ref indirect_page (fun () ->
-        fn (Req.Indirect [| OS.Xen.Gntref.to_int32 indirect_ref |])
+    Xen_os.Xen.Export.with_ref (fun indirect_ref ->
+      Xen_os.Xen.Export.with_grant ~domid:t.t.backend_id ~writable:false indirect_ref indirect_page (fun () ->
+        fn (Req.Indirect [| Xen_os.Xen.Gntref.to_int32 indirect_ref |])
       )
     )
   )
@@ -270,14 +270,14 @@ let single_request_into op t start_sector ?(start_offset=0) ?(end_offset=7) page
   let rec retry () =
     Lwt.catch
       (fun () ->
-      OS.Xen.Export.with_refs len
+      Xen_os.Xen.Export.with_refs len
         (fun rs ->
-           OS.Xen.Export.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
+           Xen_os.Xen.Export.with_grants ~domid:t.t.backend_id ~writable:(op = Req.Read) rs pages
              (fun () ->
                 let rs = Array.of_list rs in
                 let nr_segs = Array.length rs in
                 with_segs t ~start_offset ~end_offset rs (fun segs ->
-                  let id = Int64.of_int32 @@ OS.Xen.Gntref.to_int32 rs.(0) in
+                  let id = Int64.of_int32 @@ Xen_os.Xen.Gntref.to_int32 rs.(0) in
                   let sector = Int64.(add start_sector (of_int start_offset)) in
                   let req = Req.({ op=Some op; handle=t.vdev; id; sector; nr_segs; segs }) in
                   let open Lwt.Infix in
@@ -322,7 +322,7 @@ let disconnect t =
       match Device_state.of_string state with
       | InitWait | Initialised | Connected | Closing -> Lwt.return_unit
       | _ -> fail Xs_protocol.Eagain)) >>= fun () ->
-  Lwt_list.iter_s (fun ref -> OS.Xen.Export.end_access ~release_ref:true ref) t.t.gnts
+  Lwt_list.iter_s (fun ref -> Xen_os.Xen.Export.end_access ~release_ref:true ref) t.t.gnts
 
 type error = [ Mirage_block.error | `Exn of exn ]
 
