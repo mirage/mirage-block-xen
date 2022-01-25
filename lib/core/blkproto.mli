@@ -57,7 +57,7 @@ end
 
 module Req : sig
   type seg = {
-    gref : OS.Xen.Gntref.t;
+    gref : Xen_os.Xen.Gntref.t;
     first_sector : int;
     last_sector : int;
   }

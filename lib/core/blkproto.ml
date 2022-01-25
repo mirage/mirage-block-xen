@@ -216,7 +216,7 @@ module Req = struct
   let segments_per_request = 11
 
   type seg = {
-    gref: OS.Xen.Gntref.t;
+    gref: Xen_os.Xen.Gntref.t;
     first_sector: int;
     last_sector: int;
   }
@@ -249,7 +249,7 @@ module Req = struct
   let get_segments payload nr_segs =
     Array.init nr_segs (fun i ->
       let seg = Cstruct.shift payload (i * sizeof_segment) in {
-        gref = OS.Xen.Gntref.of_int32 @@ get_segment_gref seg;
+        gref = Xen_os.Xen.Gntref.of_int32 @@ get_segment_gref seg;
         first_sector = get_segment_first_sector seg;
         last_sector = get_segment_last_sector seg;
       })
@@ -294,7 +294,7 @@ module Req = struct
     let write_segments segs buffer =
       Array.iteri (fun i seg ->
         let buf = Cstruct.shift buffer (i * sizeof_segment) in
-        set_segment_gref buf (OS.Xen.Gntref.to_int32 seg.gref);
+        set_segment_gref buf (Xen_os.Xen.Gntref.to_int32 seg.gref);
         set_segment_first_sector buf seg.first_sector;
         set_segment_last_sector buf seg.last_sector
       ) segs
