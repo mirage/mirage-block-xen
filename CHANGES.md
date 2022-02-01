@@ -1,3 +1,7 @@
+## v2.1.0 (2022-02-01)
+* Lint the OPAM file (@hannesm, #88)
+* Replace `OS` by `Xen_os` (@dinosaure, #89)
+
 ## v2.0.0 (2020-10-21)
 * Adapt to mirage-xen 6.0.0 API changes (Solo5 based Xen PVH, #87 @mato)
 
