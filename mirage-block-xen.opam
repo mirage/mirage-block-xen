@@ -8,16 +8,16 @@ doc: "https://mirage.github.io/mirage-block-xen/"
 bug-reports: "https://github.com/mirage/mirage-block-xen/issues"
 depends: [
   "ocaml" {>= "4.08.0"}
-  "dune"
+  "dune" {>= "1.0"}
   "logs"
   "lwt" {>= "2.4.3"}
   "cstruct" {>= "1.9.0"}
-  "ppx_cstruct" {build & >= "3.6.0"}
+  "ppx_cstruct" {>= "3.6.0"}
   "shared-memory-ring"
   "shared-memory-ring-lwt"
   "mirage-block" {>= "2.0.0"}
   "io-page" {>= "2.0.0"}
-  "mirage-xen" {>= "6.0.0"}
+  "mirage-xen" {>= "7.0.0"}
   "xenstore"
 ]
 build: [
@@ -41,9 +41,3 @@ library which enables high-throughput, low-latency data
 transfers over shared memory on both x86 and ARM architectures,
 using the standard Xen RPC and event channel semantics.
 """
-pin-depends:[
-  [ "mirage-xen.dev" "git+https://github.com/dinosaure/mirage-xen.git#b7b5eaebead17a864b53085b60351a1648ba05b1" ]
-  [ "mirage-runtime.4.0.0" "git+https://github.com/mirage/mirage.git#59101cd795e741982a0a4580c113072339e1389b" ]
-  [ "functoria-runtime.4.0.0" "git+https://github.com/mirage/mirage.git#59101cd795e741982a0a4580c113072339e1389b" ]
-  [ "functoria.4.0.0" "git+https://github.com/mirage/mirage.git#59101cd795e741982a0a4580c113072339e1389b" ]
-]
