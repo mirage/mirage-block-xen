@@ -1,3 +1,6 @@
+## v2.1.1 (2022-04-19)
+* Adapt to `cstruct.6.0.0` and `fmt.0.8.7` (@hannesm, #91)
+
 ## v2.1.0 (2022-02-01)
 * Lint the OPAM file (@hannesm, #88)
 * Replace `OS` by `Xen_os` (@dinosaure, #89)
