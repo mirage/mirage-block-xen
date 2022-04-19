@@ -105,8 +105,8 @@ module Make(A: ACTIVATIONS)(X: Xs_client_lwt.S)(B: Mirage_block.S) = struct
 
 module BlockError = struct
   open Lwt
-  let fail_read e  = Fmt.kstrf fail_with "%a" B.pp_error e
-  let fail_write e = Fmt.kstrf fail_with "%a" B.pp_write_error e
+  let fail_read e  = Fmt.kstr fail_with "%a" B.pp_error e
+  let fail_write e = Fmt.kstr fail_with "%a" B.pp_write_error e
 end
 
 let service_thread t stats =

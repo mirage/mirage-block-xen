@@ -30,7 +30,7 @@ let string_of_request r =
   let int x = string_of_int x in
   let list ty xs = String.concat "; " (List.map ty xs) in
   Printf.sprintf "{ id = [ %s ]; op = %s; sector = %Ld; length = %d; buffers = [ %s ]; depends = [ %s ]}"
-    (list int64 r.id) (string_of_op r.op) r.sector r.length (list int (List.map Cstruct.len r.buffers)) (list int64 r.depends)
+    (list int64 r.id) (string_of_op r.op) r.sector r.length (list int (List.map Cstruct.length r.buffers)) (list int64 r.depends)
 
 type t = request list
 
@@ -46,7 +46,7 @@ let conflicts a b = match a.op, b.op with
      || (add b.sector (of_int b.length) < a.sector))
 
 let add t id op sector buffers =
-  let length = List.fold_left (+) 0 (List.map Cstruct.len buffers) / 512 in
+  let length = List.fold_left (+) 0 (List.map Cstruct.length buffers) / 512 in
   let r = { id = [id]; op; sector; length; buffers; depends = [] } in
   let depends = List.(concat (map (fun r -> r.id) (filter (conflicts r) t))) in
   let r = { r with depends } in
@@ -60,12 +60,8 @@ let coalesce requests =
   | r :: rs -> reqs (if current = [] then finished else current :: finished) (Int64.(add r.sector (of_int r.length))) [ r ] rs in
   (* merge adjacent cstruct buffers *)
   let rec merge_buffers finished current = function
-  | [] -> List.rev (if Cstruct.len current = 0 then finished else current :: finished)
-  | b :: bs when current.Cstruct.len <> 0
-            && current.Cstruct.buffer == b.Cstruct.buffer
-            && (current.Cstruct.off + current.Cstruct.len = b.Cstruct.off) ->
-    merge_buffers finished (Cstruct.add_len current b.Cstruct.len) bs
-  | b :: bs -> merge_buffers (if Cstruct.len current = 0 then finished else current :: finished) b bs in
+  | [] -> List.rev (if Cstruct.length current = 0 then finished else current :: finished)
+  | b :: bs -> merge_buffers (if Cstruct.length current = 0 then finished else current :: finished) b bs in
   let merge requests =
     let batches = reqs [] (-1L) [] requests in
     List.map (function
