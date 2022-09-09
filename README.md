@@ -1,4 +1,4 @@
-mirage-xen-block
+mirage-block-xen
 ======================
 
 This library allows a Mirage OCaml application to
