@@ -458,8 +458,11 @@ let connect id =
 
 exception Buffer_not_exactly_one_page
 let to_iopage x =
-  if x.Cstruct.len <> 4096 then raise Buffer_not_exactly_one_page;
-  Io_page.of_cstruct_exn x
+  let len = Cstruct.length x in
+  if len <> 4096 then raise Buffer_not_exactly_one_page;
+  let page = Io_page.get 1 in
+  Io_page.string_blit (Cstruct.to_string x) 0 page 0 len ;
+  page
 
 let to_iopages x =
   try return (List.map to_iopage x)
@@ -467,17 +470,21 @@ let to_iopages x =
 
 let read t start_sector pages =
   let open Lwt.Infix in
-  to_iopages pages
-  >>= fun pages ->
+  (* We must allocate io_pages, then read, and then copy back into pages *)
+  let len = List.length pages in
+  let iopages = List.init len (fun _ -> Io_page.get 1) in
   Lwt.catch
     (fun () ->
-      multiple_requests_into Req.Read t (sector t start_sector) pages
+      multiple_requests_into Req.Read t (sector t start_sector) iopages
       >>= fun () ->
+      (* copy back to the input cs *)
+      List.iter2 (fun src dst -> Cstruct.blit (Io_page.to_cstruct src) 0 dst 0 (Cstruct.length dst)) iopages pages ;
       return (Ok ())
     ) (fun e -> return (Error (`Exn e)))
 
 let write t start_sector pages =
   let open Lwt.Infix in
+  (* We can copy the pages into io_pages and then write *)
   to_iopages pages
   >>= fun pages ->
   Lwt.catch
