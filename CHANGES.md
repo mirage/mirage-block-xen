@@ -1,3 +1,6 @@
+## v2.1.2 (2024-04-12)
+* Enforce address alignement with Xen (@palainp, #95)
+
 ## v2.1.1 (2022-04-19)
 * Adapt to `cstruct.6.0.0` and `fmt.0.8.7` (@hannesm, #91)
 
