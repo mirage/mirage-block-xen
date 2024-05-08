@@ -12,7 +12,6 @@ depends: [
   "logs"
   "lwt" {>= "2.4.3"}
   "cstruct" {>= "6.0.0"}
-  "ppx_cstruct" {>= "3.6.0"}
   "shared-memory-ring"
   "shared-memory-ring-lwt"
   "mirage-block" {>= "2.0.0"}

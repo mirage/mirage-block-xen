@@ -195,17 +195,33 @@ end
 module Req = struct
 
   (* Defined in include/xen/io/blkif.h, BLKIF_REQ_* *)
-  [%%cenum
   type op =
-    | Read          [@id 0]
-    | Write         [@id 1]
-    | Write_barrier [@id 2]
-    | Flush         [@id 3]
-    | Op_reserved_1 [@id 4] (* SLES device-specific packet *)
-    | Trim          [@id 5]
-    | Indirect_op   [@id 6]
-    [@@int8_t]
-  ]
+    | Read
+    | Write
+    | Write_barrier
+    | Flush
+    | Op_reserved_1 (* SLES device-specific packet *)
+    | Trim
+    | Indirect_op
+
+  let op_to_int = function
+    | Read -> 0
+    | Write -> 1
+    | Write_barrier -> 2
+    | Flush -> 3
+    | Op_reserved_1 -> 4
+    | Trim -> 5
+    | Indirect_op -> 6
+
+  let int_to_op = function
+    | 0 -> Some Read
+    | 1 -> Some Write
+    | 2 -> Some Write_barrier
+    | 3 -> Some Flush
+    | 4 -> Some Op_reserved_1
+    | 5 -> Some Trim
+    | 6 -> Some Indirect_op
+    | _ -> None
 
   let string_of_op = function
   | Read -> "Read" | Write -> "Write" | Write_barrier -> "Write_barrier"
@@ -236,15 +252,20 @@ module Req = struct
   }
 
   (* The segment looks the same in both 32-bit and 64-bit versions *)
-  [%%cstruct
-  type segment = {
-    gref: uint32_t;
-    first_sector: uint8_t;
-    last_sector: uint8_t;
-    _padding: uint16_t;
-  } [@@little_endian]
-  ]
-  let _ = assert (sizeof_segment = 8)
+(*  type segment = {
+    gref: int32;
+    first_sector: int; (* 8 bit *)
+    last_sector: int; (* 8 bit *)
+    _padding: int; (* 16 bit *)
+    } *)
+
+  let get_segment_gref c = Cstruct.LE.get_uint32 c 0
+  let set_segment_gref c v = Cstruct.LE.set_uint32 c 0 v
+  let get_segment_first_sector c = Cstruct.get_uint8 c 4
+  let set_segment_first_sector c v = Cstruct.set_uint8 c 4 v
+  let get_segment_last_sector c = Cstruct.get_uint8 c 5
+  let set_segment_last_sector c v = Cstruct.set_uint8 c 5 v
+  let sizeof_segment = 8
 
   let get_segments payload nr_segs =
     Array.init nr_segs (fun i ->
@@ -343,19 +364,27 @@ module Req = struct
       end
   end
   module Proto_64 = Marshalling(struct
-    [%%cstruct
-    type hdr = {
+    (* type hdr = {
       op: uint8_t;
       nr_segs: uint8_t;
       handle: uint16_t;
       _padding: uint32_t; (* emitted by C compiler *)
       id: uint64_t;
       sector: uint64_t;
-    } [@@little_endian]
-    ]
+       } *)
+      let sizeof_hdr = 24
+      let get_hdr_op c = Cstruct.get_uint8 c 0
+      let set_hdr_op c v = Cstruct.set_uint8 c 0 v
+      let get_hdr_nr_segs c = Cstruct.get_uint8 c 1
+      let set_hdr_nr_segs c v = Cstruct.set_uint8 c 1 v
+      let get_hdr_handle c = Cstruct.LE.get_uint16 c 2
+      let set_hdr_handle c v = Cstruct.LE.set_uint16 c 2 v
+      let get_hdr_id c = Cstruct.LE.get_uint64 c 8
+      let set_hdr_id c v = Cstruct.LE.set_uint64 c 8 v
+      let get_hdr_sector c = Cstruct.LE.get_uint64 c 16
+      let set_hdr_sector c v = Cstruct.LE.set_uint64 c 16 v
   end) (struct
-    [%%cstruct
-    type hdr = {
+    (* type hdr = {
       op: uint8_t;
       indirect_op: uint8_t;
       nr_segs: uint16_t;
@@ -365,24 +394,44 @@ module Req = struct
       handle: uint16_t;
       _padding2: uint16_t;
       (* up to 8 grant references *)
-    } [@@little_endian]
-    ]
+       } *)
+      let sizeof_hdr = 28
+      let get_hdr_op c = Cstruct.get_uint8 c 0
+      let set_hdr_op c v = Cstruct.set_uint8 c 0 v
+      let get_hdr_indirect_op c = Cstruct.get_uint8 c 1
+      let set_hdr_indirect_op c v = Cstruct.set_uint8 c 1 v
+      let get_hdr_nr_segs c = Cstruct.LE.get_uint16 c 2
+      let set_hdr_nr_segs c v = Cstruct.LE.set_uint16 c 2 v
+      let get_hdr_id c = Cstruct.LE.get_uint64 c 8
+      let set_hdr_id c v = Cstruct.LE.set_uint64 c 8 v
+      let get_hdr_sector c = Cstruct.LE.get_uint64 c 16
+      let set_hdr_sector c v = Cstruct.LE.set_uint64 c 16 v
+      let get_hdr_handle c = Cstruct.LE.get_uint16 c 24
+      let set_hdr_handle c v = Cstruct.LE.set_uint16 c 24 v
   end)
 
   module Proto_32 = Marshalling(struct
-    [%%cstruct
-    type hdr = {
+    (* type hdr = {
       op: uint8_t;
       nr_segs: uint8_t;
       handle: uint16_t;
       (* uint32_t       _padding; -- not included *)
       id: uint64_t;
       sector: uint64_t;
-    } [@@little_endian]
-    ]
+    } *)
+      let sizeof_hdr = 20
+      let get_hdr_op c = Cstruct.get_uint8 c 0
+      let set_hdr_op c v = Cstruct.set_uint8 c 0 v
+      let get_hdr_nr_segs c = Cstruct.get_uint8 c 1
+      let set_hdr_nr_segs c v = Cstruct.set_uint8 c 1 v
+      let get_hdr_handle c = Cstruct.LE.get_uint16 c 2
+      let set_hdr_handle c v = Cstruct.LE.set_uint16 c 2 v
+      let get_hdr_id c = Cstruct.LE.get_uint64 c 4
+      let set_hdr_id c v = Cstruct.LE.set_uint64 c 4 v
+      let get_hdr_sector c = Cstruct.LE.get_uint64 c 12
+      let set_hdr_sector c v = Cstruct.LE.set_uint64 c 12 v
   end) (struct
-    [%%cstruct
-    type hdr = {
+    (* type hdr = {
       op: uint8_t;
       indirect_op: uint8_t;
       nr_segs: uint16_t;
@@ -391,21 +440,39 @@ module Req = struct
       handle: uint16_t;
       _padding1: uint16_t;
       (* up to 8 grant references *)
-    } [@@little_endian]
-    ]
+       } *)
+      let sizeof_hdr = 24
+      let get_hdr_op c = Cstruct.get_uint8 c 0
+      let set_hdr_op c v = Cstruct.set_uint8 c 0 v
+      let get_hdr_indirect_op c = Cstruct.get_uint8 c 1
+      let set_hdr_indirect_op c v = Cstruct.set_uint8 c 1 v
+      let get_hdr_nr_segs c = Cstruct.LE.get_uint16 c 2
+      let set_hdr_nr_segs c v = Cstruct.LE.set_uint16 c 2 v
+      let get_hdr_id c = Cstruct.LE.get_uint64 c 4
+      let set_hdr_id c v = Cstruct.LE.set_uint64 c 4 v
+      let get_hdr_sector c = Cstruct.LE.get_uint64 c 12
+      let set_hdr_sector c v = Cstruct.LE.set_uint64 c 12 v
+      let get_hdr_handle c = Cstruct.LE.get_uint16 c 20
+      let set_hdr_handle c v = Cstruct.LE.set_uint16 c 20 v
   end)
 end
 
 module Res = struct
 
   (* Defined in include/xen/io/blkif.h, BLKIF_RSP_* *)
-  [%%cenum
   type rsp =
-    | OK            [@id 0]
-    | Error         [@id 0xffff]
-    | Not_supported [@id 0xfffe]
-    [@@uint16_t]
-  ]
+    | OK
+    | Error
+    | Not_supported
+  let rsp_to_int = function
+    | OK -> 0
+    | Error -> 0xffff
+    | Not_supported -> 0xfffe
+  let int_to_rsp = function
+    | 0 -> Some OK
+    | 0xffff -> Some Error
+    | 0xfffe -> Some Not_supported
+    | _ -> None
   (* Defined in include/xen/io/blkif.h, blkif_response_t *)
   type t = {
     op: Req.op option;
@@ -414,16 +481,22 @@ module Res = struct
 
   (* The same structure is used in both the 32- and 64-bit protocol versions,
      modulo the extra padding at the end. *)
-  [%%cstruct
-  type response_hdr = {
-    id: uint64_t;
+  (* type response_hdr = {
+    id: int64;
     op: uint8_t;
     _padding: uint8_t;
     st: uint16_t;
     (* 64-bit only but we don't need to care since there aren't any more fields: *)
     _padding2: uint32_t;
-  } [@@little_endian]
-  ]
+     } *)
+
+  let get_response_hdr_id c = Cstruct.LE.get_uint64 c 0
+  let set_response_hdr_id c v = Cstruct.LE.set_uint64 c 0 v
+  let get_response_hdr_op c = Cstruct.get_uint8 c 8
+  let set_response_hdr_op c v = Cstruct.set_uint8 c 8 v
+  let get_response_hdr_st c = Cstruct.LE.get_uint16 c 10
+  let set_response_hdr_st c v = Cstruct.LE.set_uint16 c 10 v
+
   let write_response (id, t) slot =
     set_response_hdr_id slot id;
     set_response_hdr_op slot (match t.op with None -> -1 | Some x -> Req.op_to_int x);
