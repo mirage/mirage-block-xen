@@ -1,3 +1,6 @@
+## v2.1.3 (2024-05-08)
+* Remove ppx_cstruct dependency (@hannesm, #97)
+
 ## v2.1.2 (2024-04-12)
 * Enforce address alignement with Xen (@palainp, #95)
 
