@@ -41,3 +41,4 @@ library which enables high-throughput, low-latency data
 transfers over shared memory on both x86 and ARM architectures,
 using the standard Xen RPC and event channel semantics.
 """
+x-maintenance-intent: [ "(latest)" ]
